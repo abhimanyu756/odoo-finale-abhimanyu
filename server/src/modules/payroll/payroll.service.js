@@ -64,7 +64,8 @@ export async function eligibleEmployees({ periodStart, periodEnd, departmentId, 
   );
 }
 
-const warn = (code, message, severity = 'WARNING') => ({ code, message, severity });
+const warn = (code, message, severity = 'WARNING', payslipId = null) =>
+  ({ code, message, severity, payslipId });
 
 // Checks run before and after computation and surface on the payrun screen.
 export async function collectWarnings(payrun, tx = prisma) {
@@ -81,20 +82,21 @@ export async function collectWarnings(payrun, tx = prisma) {
     const who = `${slip.employee.firstName} ${slip.employee.lastName}`;
 
     if (!slip.employee.bankAccount) {
-      warnings.push(warn('MISSING_BANK', `${who} has no bank account on file`));
+      warnings.push(warn('MISSING_BANK', `${who} has no bank account on file`, 'WARNING', slip.id));
     }
     if (!slip.employee.workEmail) {
-      warnings.push(warn('MISSING_EMAIL', `${who} has no work email; payslip cannot be sent`));
+      warnings.push(warn('MISSING_EMAIL', `${who} has no work email; payslip cannot be sent`, 'WARNING', slip.id));
     }
     if (Number(slip.net) < 0) {
-      warnings.push(warn('NEGATIVE_NET', `${who} has a negative net salary`, 'ERROR'));
+      warnings.push(warn('NEGATIVE_NET', `${who} has a negative net salary`, 'ERROR', slip.id));
     }
     if (Number(slip.net) === 0 && slip.status !== 'DRAFT') {
-      warnings.push(warn('ZERO_NET', `${who} computed to a zero net salary`));
+      warnings.push(warn('ZERO_NET', `${who} computed to a zero net salary`, 'WARNING', slip.id));
     }
     if (slip.contract.status !== 'RUNNING') {
       warnings.push(
-        warn('CONTRACT_NOT_RUNNING', `${who} is paid from ${slip.contract.reference} (${slip.contract.status})`),
+        warn('CONTRACT_NOT_RUNNING',
+          `${who} is paid from ${slip.contract.reference} (${slip.contract.status})`, 'WARNING', slip.id),
       );
     }
 
@@ -110,7 +112,8 @@ export async function collectWarnings(payrun, tx = prisma) {
     });
     if (duplicates) {
       warnings.push(
-        warn('DUPLICATE_PAYSLIP', `${who} already has ${duplicates} payslip(s) covering this period`, 'ERROR'),
+        warn('DUPLICATE_PAYSLIP',
+          `${who} already has ${duplicates} payslip(s) covering this period`, 'ERROR', slip.id),
       );
     }
   }
@@ -130,6 +133,43 @@ export async function persistWarnings(payrunId, warnings, tx = prisma) {
 
 // Computes every payslip in a payrun from the period contract and the run's
 // structure, replacing any previously computed lines.
+// Computes a single payslip. Shared by the payrun action and the per-payslip
+// Compute button so both produce identical lines.
+export async function computeOnePayslip(slipId, structureRules, payrun, tx) {
+  const slip = await tx.payslip.findUnique({ where: { id: slipId } });
+  const employee = await tx.employee.findUnique({
+    where: { id: slip.employeeId },
+    include: { workingSchedule: { include: { lines: true } } },
+  });
+  const contract = await tx.contract.findUnique({
+    where: { id: slip.contractId },
+    include: { workingSchedule: { include: { lines: true } } },
+  });
+
+  const context = await buildContext(
+    { employee, contract, periodStart: payrun.periodStart, periodEnd: payrun.periodEnd },
+    tx,
+  );
+  const { lines, totals } = runRules(structureRules, context);
+
+  await tx.payslipLine.deleteMany({ where: { payslipId: slip.id } });
+  return tx.payslip.update({
+    where: { id: slip.id },
+    data: {
+      status: 'COMPUTED',
+      workedDays: context.worked_days,
+      workedHours: context.worked_hours,
+      leaveDays: context.leave_days,
+      basic: totals.basic,
+      allowance: totals.allowance,
+      gross: totals.gross,
+      deduction: totals.deduction,
+      net: totals.net,
+      lines: { create: lines },
+    },
+  });
+}
+
 export async function computePayrun(payrunId) {
   return prisma.$transaction(
     async (tx) => {
@@ -146,37 +186,7 @@ export async function computePayrun(payrunId) {
       }
 
       for (const slip of payrun.payslips) {
-        const employee = await tx.employee.findUnique({
-          where: { id: slip.employeeId },
-          include: { workingSchedule: { include: { lines: true } } },
-        });
-        const contract = await tx.contract.findUnique({
-          where: { id: slip.contractId },
-          include: { workingSchedule: { include: { lines: true } } },
-        });
-
-        const context = await buildContext(
-          { employee, contract, periodStart: payrun.periodStart, periodEnd: payrun.periodEnd },
-          tx,
-        );
-        const { lines, totals } = runRules(payrun.structure.rules, context);
-
-        await tx.payslipLine.deleteMany({ where: { payslipId: slip.id } });
-        await tx.payslip.update({
-          where: { id: slip.id },
-          data: {
-            status: 'COMPUTED',
-            workedDays: context.worked_days,
-            workedHours: context.worked_hours,
-            leaveDays: context.leave_days,
-            basic: totals.basic,
-            allowance: totals.allowance,
-            gross: totals.gross,
-            deduction: totals.deduction,
-            net: totals.net,
-            lines: { create: lines },
-          },
-        });
+        await computeOnePayslip(slip.id, payrun.structure.rules, payrun, tx);
       }
 
       const updated = await tx.payrun.update({

@@ -11,6 +11,7 @@ import {
   eligibleEmployees,
   nextPayslipNumber,
   computePayrun,
+  computeOnePayslip,
   collectWarnings,
   persistWarnings,
 } from './payroll.service.js';
@@ -21,6 +22,16 @@ router.use(authenticate);
 const canRead = requireMinRole('HR_PAYROLL_USER');
 const canWrite = requireMinRole('HR_PAYROLL_USER');
 const canFinalise = requireMinRole('HR_PAYROLL_ADMIN');
+
+// Compact labels matching the mockup's Warning column ("A/C missing", "Duplicate").
+const WARNING_LABELS = {
+  MISSING_BANK: 'A/C missing',
+  MISSING_EMAIL: 'No email',
+  DUPLICATE_PAYSLIP: 'Duplicate',
+  NEGATIVE_NET: 'Negative net',
+  ZERO_NET: 'Zero net',
+  CONTRACT_NOT_RUNNING: 'Contract',
+};
 
 const slipShape = (s) => ({
   ...s,
@@ -33,6 +44,11 @@ const slipShape = (s) => ({
   deduction: num(s.deduction),
   net: num(s.net),
   lines: s.lines?.map((l) => ({ ...l, amount: num(l.amount) })),
+  // Short label for the list's Warning column; full messages stay in `warnings`.
+  warningLabel: s.warnings?.length
+    ? WARNING_LABELS[s.warnings[0].code] ?? 'Attention'
+    : null,
+  warningSeverity: s.warnings?.some((w) => w.severity === 'ERROR') ? 'ERROR' : (s.warnings?.length ? 'WARNING' : null),
   employee: s.employee
     ? { id: s.employee.id, name: `${s.employee.firstName} ${s.employee.lastName}`, workEmail: s.employee.workEmail }
     : undefined,
@@ -304,7 +320,8 @@ router.get(
         orderBy: q.sortBy ? { [q.sortBy]: q.sortDir } : { periodStart: 'desc' },
         include: {
           employee: { select: { id: true, firstName: true, lastName: true, workEmail: true } },
-          payrun: { select: { id: true, name: true } },
+          payrun: { select: { id: true, name: true, structure: { select: { name: true } } } },
+          warnings: { select: { code: true, message: true, severity: true } },
         },
       }),
       prisma.payslip.count({ where }),
@@ -313,6 +330,25 @@ router.get(
     res.json(listResponse(rows.map(slipShape), total, q));
   }),
 );
+
+const PAYSLIP_DETAIL = {
+  employee: {
+    select: {
+      id: true, firstName: true, lastName: true, workEmail: true, bankAccount: true,
+      department: { select: { id: true, name: true } },
+      jobPosition: { select: { id: true, name: true } },
+    },
+  },
+  contract: { select: { id: true, reference: true, wage: true, status: true } },
+  payrun: { select: { id: true, name: true, status: true, structure: { select: { id: true, name: true } } } },
+  lines: { orderBy: { sequence: 'asc' } },
+  warnings: true,
+};
+
+const loadPayslip = async (id) => {
+  const row = await prisma.payslip.findUnique({ where: { id }, include: PAYSLIP_DETAIL });
+  return { ...slipShape(row), contract: { ...row.contract, wage: num(row.contract.wage) } };
+};
 
 router.get(
   '/payslips/:id',
@@ -343,6 +379,107 @@ router.get(
     }
 
     res.json({ ...slipShape(row), contract: { ...row.contract, wage: num(row.contract.wage) } });
+  }),
+);
+
+router.post(
+  '/payslips/:id/compute',
+  canWrite,
+  asyncHandler(async (req, res) => {
+    const slip = await prisma.payslip.findUnique({
+      where: { id: req.params.id },
+      include: { payrun: { include: { structure: { include: { rules: true } } } } },
+    });
+    if (!slip) throw notFound('Payslip not found');
+    if (['VALIDATED', 'PAID'].includes(slip.payrun.status)) {
+      throw badRequest(`This payslip belongs to a ${slip.payrun.status.toLowerCase()} payrun and cannot be recomputed`);
+    }
+    if (!slip.payrun.structure.rules.length) {
+      throw badRequest(`Structure ${slip.payrun.structure.name} has no salary rules`);
+    }
+
+    await prisma.$transaction(
+      (tx) => computeOnePayslip(slip.id, slip.payrun.structure.rules, slip.payrun, tx),
+      { timeout: 20_000 },
+    );
+
+    // Warnings are payrun-wide, so recompute them for the whole run.
+    await persistWarnings(slip.payrunId, await collectWarnings(slip.payrun));
+
+    res.json(await loadPayslip(slip.id));
+  }),
+);
+
+router.post(
+  '/payslips/:id/validate',
+  canFinalise,
+  asyncHandler(async (req, res) => {
+    const slip = await prisma.payslip.findUnique({
+      where: { id: req.params.id },
+      include: { payrun: true, warnings: true },
+    });
+    if (!slip) throw notFound('Payslip not found');
+    if (slip.status === 'DRAFT') throw badRequest('Compute this payslip before validating it');
+    if (['VALIDATED', 'PAID'].includes(slip.status)) {
+      throw badRequest('This payslip is already validated');
+    }
+
+    // Only this payslip's own blocking issues stop it; a problem on someone
+    // else's payslip should not hold this one up.
+    const blocking = slip.warnings.filter((w) => w.severity === 'ERROR');
+    if (blocking.length) {
+      throw badRequest(
+        `Resolve this payslip's blocking issue: ${blocking.map((w) => w.message).join('; ')}`,
+        { warnings: blocking },
+      );
+    }
+
+    await prisma.payslip.update({ where: { id: slip.id }, data: { status: 'VALIDATED' } });
+
+    // Once every payslip is validated, the run itself is validated.
+    const pending = await prisma.payslip.count({
+      where: { payrunId: slip.payrunId, status: { in: ['DRAFT', 'COMPUTED'] } },
+    });
+    if (!pending && slip.payrun.status === 'COMPUTED') {
+      await prisma.payrun.update({
+        where: { id: slip.payrunId },
+        data: { status: 'VALIDATED', validatedAt: new Date() },
+      });
+    }
+
+    res.json(await loadPayslip(slip.id));
+  }),
+);
+
+router.post(
+  '/payslips/:id/mark-paid',
+  canFinalise,
+  asyncHandler(async (req, res) => {
+    const slip = await prisma.payslip.findUnique({
+      where: { id: req.params.id },
+      include: { payrun: true },
+    });
+    if (!slip) throw notFound('Payslip not found');
+    // The payslip itself must be validated first; the payrun follows along as
+    // its payslips are validated, so there is no need to leave this screen.
+    if (slip.status === 'DRAFT') throw badRequest('Compute and validate this payslip first');
+    if (slip.status === 'COMPUTED') throw badRequest('Validate this payslip before marking it paid');
+    if (slip.status === 'PAID') throw badRequest('This payslip is already marked paid');
+
+    await prisma.payslip.update({ where: { id: slip.id }, data: { status: 'PAID' } });
+
+    // When every payslip is paid, the run itself is paid.
+    const outstanding = await prisma.payslip.count({
+      where: { payrunId: slip.payrunId, status: { not: 'PAID' } },
+    });
+    if (!outstanding && slip.payrun.status !== 'PAID') {
+      await prisma.payrun.update({
+        where: { id: slip.payrunId },
+        data: { status: 'PAID', paidAt: new Date() },
+      });
+    }
+
+    res.json(await loadPayslip(slip.id));
   }),
 );
 

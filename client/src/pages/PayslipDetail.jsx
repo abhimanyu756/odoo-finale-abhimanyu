@@ -1,8 +1,11 @@
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer } from 'lucide-react';
+import { ArrowLeft, Printer, Calculator, BadgeCheck, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
 import { useFetch } from '../hooks/useApi';
-import { getAccessToken } from '../lib/api';
+import { api, errorMessage, getAccessToken } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { isPayroll, isPayrollAdmin } from '../lib/roles';
 import { money, date, titleCase } from '../lib/format';
 import { PageHeader, Spinner, ErrorState, StatusBadge } from '../components/ui';
 
@@ -24,7 +27,22 @@ const CATEGORY_TONES = {
 export default function PayslipDetail() {
   const { id } = useParams();
   const toast = useToast();
+  const { role } = useAuth();
+  const [busy, setBusy] = useState(null);
   const { data: slip, loading, error, refetch } = useFetch(`/payroll/payslips/${id}`);
+
+  const act = async (kind, label) => {
+    setBusy(kind);
+    try {
+      await api.post(`/payroll/payslips/${id}/${kind}`);
+      toast.success(`${label} complete`);
+      refetch();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   if (loading) return <Spinner label="Loading payslip" />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
@@ -50,18 +68,69 @@ export default function PayslipDetail() {
     <>
       <PageHeader
         breadcrumb={
-          <Link to="/payroll/payslips" className="mb-1 flex items-center gap-1 text-xs text-ink-soft hover:text-odoo-600">
-            <ArrowLeft size={12} /> Payslips
-          </Link>
+          <div className="mb-1 flex items-center gap-3 text-xs">
+            <Link to="/payroll/payslips" className="flex items-center gap-1 text-ink-soft hover:text-odoo-600">
+              <ArrowLeft size={12} /> Payslips
+            </Link>
+            {slip?.payrun && (
+              <Link to={`/payroll/payruns/${slip.payrun.id}`} className="text-ink-soft hover:text-odoo-600">
+                · {slip.payrun.name}
+              </Link>
+            )}
+          </div>
         }
         title={`Payslip / ${slip.employee?.name}`}
         subtitle={`${slip.number} · ${date(slip.periodStart)} – ${date(slip.periodEnd)}`}
         actions={
-          <button type="button" className="o-btn-primary" onClick={printPdf}>
-            <Printer size={14} /> Print Payslip
-          </button>
+          <>
+            {isPayroll(role) && (
+              <button type="button" className="o-btn-secondary" disabled={busy}
+                onClick={() => act('compute', 'Computation')}>
+                <Calculator size={14} /> {busy === 'compute' ? 'Computing…' : 'Compute'}
+              </button>
+            )}
+            {isPayrollAdmin(role) && (
+              <>
+                <button type="button" className="o-btn-secondary"
+                  disabled={busy || slip?.status !== 'COMPUTED'}
+                  onClick={() => act('validate', 'Validation')}>
+                  <CheckCircle2 size={14} /> {busy === 'validate' ? 'Validating…' : 'Validate'}
+                </button>
+                <button type="button" className="o-btn-secondary"
+                  disabled={busy || slip?.status !== 'VALIDATED'}
+                  onClick={() => act('mark-paid', 'Payment')}>
+                  <BadgeCheck size={14} /> Mark Paid
+                </button>
+              </>
+            )}
+            <button type="button" className="o-btn-primary" onClick={printPdf}>
+              <Printer size={14} /> Print Payslip
+            </button>
+          </>
         }
       />
+
+      {slip.warnings?.length > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <p className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-amber-800">
+            <AlertTriangle size={15} />
+            {slip.warnings.length} item{slip.warnings.length === 1 ? '' : 's'} requiring attention
+          </p>
+          <ul className="ml-5 list-disc space-y-0.5 text-xs text-amber-800">
+            {slip.warnings.map((w) => <li key={w.id}>{w.message}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {isPayrollAdmin(role) && slip.status !== 'PAID' && (
+        <p className="mb-4 rounded border border-hairline bg-gray-50 px-3 py-2 text-xs text-ink-soft">
+          <strong className="text-ink">Next step:</strong>{' '}
+          {slip.status === 'DRAFT' && 'Compute this payslip to generate its salary lines.'}
+          {slip.status === 'COMPUTED' && 'Validate this payslip, then mark it paid.'}
+          {slip.status === 'VALIDATED' && 'Mark this payslip paid once payment has been released.'}
+          {' '}The payrun advances automatically once every payslip reaches the same stage.
+        </p>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="o-card p-4 lg:col-span-1">

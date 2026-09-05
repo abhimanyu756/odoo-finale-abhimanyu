@@ -98,6 +98,14 @@ router.get(
       ]);
 
     // ---- KPIs
+    // A period can hold payslips that are not computed yet, which reads as an
+    // empty dashboard unless the UI is told why.
+    const byStatus = payslips.reduce((acc, p) => {
+      acc[p.status] = (acc[p.status] ?? 0) + 1;
+      return acc;
+    }, {});
+    const uncomputed = byStatus.DRAFT ?? 0;
+
     const totalNet = payslips.reduce((s, p) => s + n(p.net), 0);
     const totalGross = payslips.reduce((s, p) => s + n(p.gross), 0);
     const paidSlips = payslips.filter((p) => p.status === 'PAID');
@@ -167,6 +175,13 @@ router.get(
       alerts.push({ code: 'CONTRACT_EXPIRING', severity: 'INFO',
         message: `${expiring} contract(s) expire within 30 days` });
     }
+    if (uncomputed) {
+      alerts.push({
+        code: 'PAYSLIPS_NOT_COMPUTED',
+        severity: 'INFO',
+        message: `${uncomputed} payslip(s) in this period are still draft — compute the payrun to see salary figures`,
+      });
+    }
     if (pendingLeaves) {
       alerts.push({ code: 'PENDING_LEAVE', severity: 'INFO',
         message: `${pendingLeaves} time off request(s) awaiting approval` });
@@ -183,6 +198,8 @@ router.get(
         totalGross: round(totalGross),
         payslipCount: payslips.length,
         paidCount: paidSlips.length,
+        draftCount: uncomputed,
+        payslipsByStatus: byStatus,
         avgSalary: round(avgSalary),
         headcount: scopedEmployees.length,
         approvedLeaveDays: round(leaves.reduce((s, l) => s + n(l.duration), 0)),

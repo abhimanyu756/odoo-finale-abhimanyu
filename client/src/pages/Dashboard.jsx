@@ -19,17 +19,15 @@ const SEVERITY = {
 
 export default function Dashboard() {
   const [filters, setFilters] = useState({});
+  // Filter values are held in state, not left to the DOM: a refetch re-renders
+  // this component and an uncontrolled input would come back blank.
+  const [period, setPeriod] = useState('');
   const [showTable, setShowTable] = useState(false);
   const { data, loading, error, refetch } = useFetch('/dashboard', { params: filters });
   const { data: depts } = useFetch('/org/departments');
 
-  if (loading) return <Spinner label="Building dashboard" />;
-  if (error) return <ErrorState message={error} onRetry={refetch} />;
-  if (!data) return null;
-
-  const k = data.kpis;
-
   const setMonthRange = (value) => {
+    setPeriod(value);
     if (!value) {
       setFilters((f) => ({ ...f, periodStart: undefined, periodEnd: undefined }));
       return;
@@ -42,7 +40,16 @@ export default function Dashboard() {
     }));
   };
 
-  const kpiTiles = [
+  const periodLabel = period
+    ? new Date(`${period}-01T00:00:00Z`).toLocaleDateString('en-IN', {
+        month: 'long', year: 'numeric', timeZone: 'UTC',
+      })
+    : 'Last 12 months';
+
+  const k = data?.kpis;
+
+  // Built only once data exists; the filter bar renders before that.
+  const kpiTiles = !k ? [] : [
     { label: 'Total Net Salary Paid', value: money(k.totalNet), icon: IndianRupee,
       hint: `${k.paidCount} of ${k.payslipCount} payslips paid` },
     { label: 'Payslips Generated', value: k.payslipCount, icon: Receipt,
@@ -68,27 +75,42 @@ export default function Dashboard() {
         }
       />
 
-      {/* Filters sit in one row above the charts */}
-      <div className="mb-4 flex flex-wrap gap-2">
+      {/* Filters sit in one row above the charts and stay mounted while data reloads */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-xs text-ink-soft">
           Period
           <input type="month" className="o-input w-auto"
-            defaultValue=""
+            value={period}
             onChange={(e) => setMonthRange(e.target.value)} />
         </label>
+        {period && (
+          <button type="button" className="o-btn-ghost px-2 py-1 text-xs"
+            onClick={() => setMonthRange('')}>
+            Clear
+          </button>
+        )}
         <select className="o-input w-auto"
+          value={filters.departmentId ?? ''}
           onChange={(e) => setFilters((f) => ({ ...f, departmentId: e.target.value || undefined }))}>
           <option value="">All departments</option>
           {(depts ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
         <select className="o-input w-auto"
+          value={filters.employeeType ?? ''}
           onChange={(e) => setFilters((f) => ({ ...f, employeeType: e.target.value || undefined }))}>
           <option value="">All employee types</option>
           {['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN'].map((t) => (
             <option key={t} value={t}>{t.replace('_', ' ')}</option>
           ))}
         </select>
+        <span className="o-badge bg-odoo-50 text-odoo-700">{periodLabel}</span>
+        {loading && <span className="text-xs text-ink-soft">Updating…</span>}
       </div>
+
+      {error && <ErrorState message={error} onRetry={refetch} />}
+      {!data && loading && <Spinner label="Building dashboard" />}
+      {data && (
+      <>
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {kpiTiles.map((t) => (
@@ -102,6 +124,24 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* Zero totals with payslips present means "not computed", not "no data" */}
+      {k.payslipCount > 0 && k.totalNet === 0 && k.draftCount > 0 && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+          <Info size={16} className="mt-0.5 shrink-0" />
+          <span>
+            <strong>{k.draftCount} of {k.payslipCount} payslips in this period are still draft.</strong>{' '}
+            Salary figures stay at zero until the payrun is computed — the charts below are not
+            empty by mistake.
+            {data.payrunStatus.filter((p) => p.status === 'DRAFT').map((p) => (
+              <Link key={p.id} to={`/payroll/payruns/${p.id}`}
+                className="ml-1 font-medium underline hover:no-underline">
+                Open {p.name}
+              </Link>
+            ))}
+          </span>
+        </div>
+      )}
 
       {data.alerts.length > 0 && (
         <div className="mb-4 o-card p-3">
@@ -159,17 +199,29 @@ export default function Dashboard() {
           <section className="o-card p-4">
             <h2 className="text-sm font-semibold text-ink">Salary Cost by Department</h2>
             <p className="mb-3 text-xs text-ink-soft">Net salary in the selected period</p>
-            {data.salaryByDepartment.length
-              ? <DepartmentCostChart data={data.salaryByDepartment} />
-              : <p className="py-8 text-center text-sm text-ink-soft">No payroll data in this period</p>}
+            {data.salaryByDepartment.some((d) => d.net > 0)
+              ? <DepartmentCostChart data={data.salaryByDepartment.filter((d) => d.net > 0)} />
+              : (
+                <p className="py-8 text-center text-sm text-ink-soft">
+                  {k.draftCount > 0
+                    ? 'Payslips for this period are not computed yet'
+                    : 'No payroll data in this period'}
+                </p>
+              )}
           </section>
 
           <section className="o-card p-4">
             <h2 className="text-sm font-semibold text-ink">Monthly Net Salary Trend</h2>
             <p className="mb-3 text-xs text-ink-soft">Total net salary per payroll period</p>
-            {data.monthlyTrend.length
+            {data.monthlyTrend.some((m) => m.net > 0)
               ? <NetSalaryTrend data={data.monthlyTrend} />
-              : <p className="py-8 text-center text-sm text-ink-soft">No trend data yet</p>}
+              : (
+                <p className="py-8 text-center text-sm text-ink-soft">
+                  {k.draftCount > 0
+                    ? 'Nothing computed in this period yet'
+                    : 'No trend data yet'}
+                </p>
+              )}
           </section>
 
           <section className="o-card p-4">
@@ -203,6 +255,8 @@ export default function Dashboard() {
             ))}
           </div>
         </div>
+      )}
+      </>
       )}
     </>
   );

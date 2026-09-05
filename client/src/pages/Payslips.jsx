@@ -1,5 +1,5 @@
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Receipt, Search } from 'lucide-react';
+import { Receipt, Search, AlertTriangle } from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { useAuth } from '../context/AuthContext';
 import { isPayroll } from '../lib/roles';
@@ -49,9 +49,9 @@ export default function Payslips() {
               <table className="o-table">
                 <thead>
                   <tr>
-                    <th>Payslip</th><th>Employee</th><th>Payrun</th><th>Period</th>
-                    <th className="text-right">Gross</th><th className="text-right">Deductions</th>
-                    <th className="text-right">Net</th><th>Status</th>
+                    <th>Payslip</th><th>Employee</th><th>Warning</th><th>Period</th>
+                    <th className="text-right">Basic</th><th className="text-right">Gross</th>
+                    <th className="text-right">Net</th><th>Structure</th><th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -59,11 +59,23 @@ export default function Payslips() {
                     <tr key={s.id} className="cursor-pointer" onClick={() => navigate(`/payroll/payslips/${s.id}`)}>
                       <td className="font-mono text-xs text-ink-soft">{s.number}</td>
                       <td className="font-medium text-ink">{s.employee?.name}</td>
-                      <td className="text-ink-soft">{s.payrun?.name}</td>
-                      <td>{date(s.periodStart)}</td>
+                      <td>
+                        {s.warningLabel
+                          ? (
+                            <span className={`o-badge ${
+                              s.warningSeverity === 'ERROR'
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-700'}`}>
+                              <AlertTriangle size={11} /> {s.warningLabel}
+                            </span>
+                          )
+                          : <span className="text-ink-soft">—</span>}
+                      </td>
+                      <td className="text-xs">{date(s.periodStart)} – {date(s.periodEnd)}</td>
+                      <td className="text-right tabular-nums">{money(s.basic)}</td>
                       <td className="text-right tabular-nums">{money(s.gross)}</td>
-                      <td className="text-right tabular-nums text-red-600">{money(s.deduction)}</td>
                       <td className="text-right font-semibold tabular-nums">{money(s.net)}</td>
+                      <td className="text-ink-soft">{s.payrun?.structure?.name ?? '—'}</td>
                       <td><StatusBadge value={s.status} /></td>
                     </tr>
                   ))}

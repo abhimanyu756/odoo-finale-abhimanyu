@@ -78,15 +78,48 @@ function PayrunWizard({ onClose, onCreated }) {
   const { data: depts } = useFetch('/org/departments');
 
   const today = new Date();
-  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const lastOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  const iso = (d) => d.toISOString().slice(0, 10);
+
+  // toISOString() converts local midnight to UTC, which rolls the date back a
+  // day in any timezone ahead of UTC. Format from local parts instead.
+  const iso = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const monthBounds = (year, monthIndex) => ({
+    periodStart: iso(new Date(year, monthIndex, 1)),
+    periodEnd: iso(new Date(year, monthIndex + 1, 0)),
+  });
+
+  const monthKey = (year, monthIndex) => `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+  const monthLabel = (year, monthIndex) =>
+    new Date(year, monthIndex, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 
   const [step, setStep] = useState(1);
+  const [period, setPeriod] = useState(monthKey(today.getFullYear(), today.getMonth()));
+  const [customPeriod, setCustomPeriod] = useState(false);
   const [scope, setScope] = useState({
-    name: `Payrun / ${today.toLocaleString('en-IN', { month: 'long', year: 'numeric' })}`,
-    structureId: '', periodStart: iso(firstOfMonth), periodEnd: iso(lastOfMonth),
+    name: `Payrun / ${monthLabel(today.getFullYear(), today.getMonth())}`,
+    structureId: '',
+    ...monthBounds(today.getFullYear(), today.getMonth()),
     departmentId: '', employeeType: '',
+  });
+
+  // Picking a month fills both bounds and renames the run to match, so the
+  // common case needs one control rather than two date fields.
+  const applyMonth = (key) => {
+    setPeriod(key);
+    if (!key) return;
+    const [y, m] = key.split('-').map(Number);
+    setScope((sc) => ({
+      ...sc,
+      ...monthBounds(y, m - 1),
+      name: `Payrun / ${monthLabel(y, m - 1)}`,
+    }));
+  };
+
+  // Twelve months back and three forward covers any realistic run.
+  const monthOptions = Array.from({ length: 16 }, (_, i) => {
+    const d = new Date(today.getFullYear(), today.getMonth() + 3 - i, 1);
+    return { key: monthKey(d.getFullYear(), d.getMonth()), label: monthLabel(d.getFullYear(), d.getMonth()) };
   });
   const [candidates, setCandidates] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -195,12 +228,33 @@ function PayrunWizard({ onClose, onCreated }) {
               {(depts ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </Field>
-          <Field label="Period Start" required>
-            <input type="date" className="o-input" value={scope.periodStart} onChange={set('periodStart')} required />
+          <Field label="Period" required hint="Sets the first and last day of the month">
+            <select className="o-input" value={customPeriod ? '' : period}
+              onChange={(e) => {
+                if (e.target.value === 'CUSTOM') { setCustomPeriod(true); return; }
+                setCustomPeriod(false);
+                applyMonth(e.target.value);
+              }}>
+              {monthOptions.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+              <option value="CUSTOM">Custom date range…</option>
+            </select>
           </Field>
-          <Field label="Period End" required>
-            <input type="date" className="o-input" value={scope.periodEnd} onChange={set('periodEnd')} required />
-          </Field>
+          <div className="flex items-end">
+            <p className="rounded-md border border-hairline bg-gray-50 px-2.5 py-1.5 text-xs text-ink-soft">
+              {scope.periodStart} → {scope.periodEnd}
+            </p>
+          </div>
+
+          {customPeriod && (
+            <>
+              <Field label="Period Start" required>
+                <input type="date" className="o-input" value={scope.periodStart} onChange={set('periodStart')} required />
+              </Field>
+              <Field label="Period End" required>
+                <input type="date" className="o-input" value={scope.periodEnd} onChange={set('periodEnd')} required />
+              </Field>
+            </>
+          )}
           <div className="sm:col-span-2">
             <p className="rounded border border-hairline bg-gray-50 px-2.5 py-1.5 text-xs text-ink-soft">
               Continuing only previews eligible employees — the payrun is created after you select them.
