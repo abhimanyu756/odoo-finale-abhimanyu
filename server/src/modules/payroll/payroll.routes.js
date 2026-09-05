@@ -418,30 +418,47 @@ router.post(
       include: PDF_INCLUDE,
     });
 
-    const results = { sent: 0, skipped: [], failed: [] };
+    const results = { sent: 0, prepared: 0, skipped: [], failed: [] };
 
-    for (const slip of slips) {
-      if (!slip.employee.workEmail) {
-        results.skipped.push({ payslip: slip.number, reason: 'No work email' });
-        continue;
-      }
+    const deliverable = slips.filter((slip) => {
+      if (slip.employee.workEmail) return true;
+      results.skipped.push({ payslip: slip.number, reason: 'No work email' });
+      return false;
+    });
+
+    // A Gmail round trip is several seconds, so sending a whole payrun in
+    // series would hold the request open for a minute. Send in small
+    // concurrent batches instead - fast, but well under Gmail's rate limits.
+    const BATCH = 4;
+    const sendOne = async (slip) => {
       try {
         const pdf = await renderPayslipPdf(slip);
         const { subject, text } = mailBody(slip);
-        await sendMail({
+        const outcome = await sendMail({
           to: slip.employee.workEmail,
           subject,
           text,
           attachments: [{ filename: `${slip.number.replace(/\//g, '-')}.pdf`, content: pdf }],
         });
-        await prisma.payslip.update({
-          where: { id: slip.id },
-          data: { emailSentAt: new Date() },
-        });
-        results.sent += 1;
+
+        // Only a real delivery counts as sent. A dry run still renders every
+        // PDF, but stamping emailSentAt would claim a delivery that never left.
+        if (outcome.delivered) {
+          await prisma.payslip.update({
+            where: { id: slip.id },
+            data: { emailSentAt: new Date() },
+          });
+          results.sent += 1;
+        } else {
+          results.prepared += 1;
+        }
       } catch (err) {
         results.failed.push({ payslip: slip.number, reason: err.message });
       }
+    };
+
+    for (let i = 0; i < deliverable.length; i += BATCH) {
+      await Promise.all(deliverable.slice(i, i + BATCH).map(sendOne));
     }
 
     await prisma.payrun.update({ where: { id: payrun.id }, data: { sentAt: new Date() } });

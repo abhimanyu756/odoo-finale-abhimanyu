@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { errorMessage } from '../lib/api';
+import AuthLayout from '../components/AuthLayout';
+import { PasswordInput } from '../components/ui';
 
 const DEMO = [
   ['admin@oxp.com', 'Admin@123', 'Administrator'],
@@ -34,19 +36,11 @@ export default function Login() {
   };
 
   return (
-    <div className="grid min-h-screen place-items-center bg-gradient-to-br from-odoo-50 via-canvas to-teal-soft/40 px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-xl bg-odoo-500 text-sm font-bold text-white">
-            PP
-          </span>
-          <h1 className="text-xl font-semibold text-ink">PeoplePay360</h1>
-          <p className="text-sm text-ink-soft">HR &amp; Payroll Operations</p>
-        </div>
-
+    <AuthLayout>
+      <>
         <form onSubmit={submit} className="o-card p-5 shadow-sm">
           <h2 className="mb-1 text-base font-semibold text-ink">Welcome back</h2>
-          <p className="mb-4 text-xs text-ink-soft">Sign in to your work account</p>
+          <p className="mb-4 text-xs text-ink-soft">Sign in to continue to your workspace.</p>
 
           <label className="mb-3 block">
             <span className="o-label">Work Email</span>
@@ -61,17 +55,21 @@ export default function Login() {
             />
           </label>
 
-          <label className="mb-4 block">
+          <label className="mb-1 block">
             <span className="o-label">Password</span>
-            <input
-              className="o-input"
-              type="password"
+            <PasswordInput
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
           </label>
+
+          <div className="mb-4 text-right">
+            <Link to="/forgot-password" className="text-xs text-odoo-600 hover:underline">
+              Forgot password?
+            </Link>
+          </div>
 
           {error && (
             <p className="mb-3 rounded border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">
@@ -109,7 +107,7 @@ export default function Login() {
             ))}
           </div>
         </div>
-      </div>
-    </div>
+      </>
+    </AuthLayout>
   );
 }

@@ -1,5 +1,46 @@
-import { Loader2, Inbox, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useId, useState } from 'react';
+import {
+  Loader2, Inbox, AlertTriangle, ChevronLeft, ChevronRight, Eye, EyeOff,
+} from 'lucide-react';
 import { titleCase } from '../lib/format';
+
+// A password field with a reveal toggle. The button is type="button" so it can
+// never submit the surrounding form, and it reports its state to screen readers
+// rather than relying on the icon alone.
+export function PasswordInput({ className = '', ...props }) {
+  const [visible, setVisible] = useState(false);
+  const id = useId();
+
+  return (
+    <div className="relative">
+      <input
+        {...props}
+        id={props.id ?? id}
+        type={visible ? 'text' : 'password'}
+        className={`o-input pr-9 ${className}`}
+      />
+      <button
+        type="button"
+        onClick={(e) => {
+          // These fields sit inside <label>, which forwards clicks to the
+          // control it wraps; without this the toggle can fire twice.
+          e.preventDefault();
+          e.stopPropagation();
+          setVisible((v) => !v);
+        }}
+        aria-controls={props.id ?? id}
+        aria-pressed={visible}
+        aria-label={visible ? 'Hide password' : 'Show password'}
+        title={visible ? 'Hide password' : 'Show password'}
+        className="absolute inset-y-0 right-0 grid w-9 place-items-center rounded-r-md text-ink-soft
+                   transition-colors hover:text-odoo-600 focus-visible:outline-2
+                   focus-visible:outline-odoo-400"
+      >
+        {visible ? <EyeOff size={15} /> : <Eye size={15} />}
+      </button>
+    </div>
+  );
+}
 
 export const Spinner = ({ label = 'Loading' }) => (
   <div className="flex items-center justify-center gap-2 py-12 text-sm text-ink-soft">

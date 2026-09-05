@@ -6,7 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { isHr } from '../lib/roles';
-import { dateTime, time, hours, date } from '../lib/format';
+import { time, hours, date } from '../lib/format';
 import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field } from '../components/ui';
 
 export default function Attendance() {

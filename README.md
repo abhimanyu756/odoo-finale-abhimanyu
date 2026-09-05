@@ -54,14 +54,46 @@ npm run dev                          # http://localhost:5173
 | `aarav@oxp.com` | `Pass@1234` | Payroll Admin | Full payroll + salary rule config |
 | `nisha@oxp.com` | `Pass@1234` | Payroll User | Payruns/payslips; salary config read-only |
 | `sara@oxp.com` | `Pass@1234` | HR Manager | HR modules; **no** payroll access |
-| `rohan@oxp.com` | `Pass@1234` | Employee | Own records only |
+| *(see below)* | `Pass@1234` | Employee | Own records only |
+
+The Employee demo account is deliberately pointed at a **real mailbox** so the
+password-reset email can be shown arriving; check `User.email` for `Rohan Patel`.
+
+### Password reset
+
+"Forgot password?" on the sign-in screen issues a single-use token (SHA-256 hashed
+in the database, 30-minute TTL) and emails a reset link. Requesting a new link
+invalidates the previous one, using a link consumes it, and completing a reset
+revokes every existing session. The endpoint returns the *same* generic response
+for known and unknown addresses, so it cannot be used to enumerate accounts.
+
+Because SMTP is unconfigured out of the box, the reset link is also returned in the
+response and printed to the server log **in development only** — so the flow is
+fully testable without email. That never happens when `NODE_ENV=production`.
 
 ### Email delivery
 
-Bulk "Send Payslips" runs without SMTP credentials — it generates every PDF and
-logs instead of sending, and the response carries `dryRun: true`. To send for real,
-set `SMTP_USER` and `SMTP_PASS` (a Gmail **App Password**, not the account password)
-in `server/.env`.
+Mail is sent from exactly one place: **Send Payslips** on a validated or paid
+payrun (`POST /api/payroll/payruns/:id/send`), plus the password-reset link above.
+
+Without SMTP credentials it runs as a dry run — every PDF is still rendered, but
+nothing is delivered: the response reports `sent: 0`, `prepared: N`, `dryRun: true`,
+`emailSentAt` is left unset, and the UI says so plainly rather than claiming a
+delivery. To send for real, set `SMTP_USER` and `SMTP_PASS` (a Gmail **App
+Password**, not the account password) in `server/.env` and restart the API.
+
+**Payslip recipients must be real mailboxes.** `Employee.workEmail` is where payslips
+are delivered; the seed's `@oxp.com` addresses do not exist, and Gmail accepts them
+at SMTP level before bouncing them back minutes later. Point them at addresses you
+control before demoing — Gmail's `+alias` form (`you+aarav@gmail.com`) works well:
+every message lands in one inbox, but SMTP treats each as a distinct recipient, so
+per-employee delivery is genuinely demonstrated.
+
+Login addresses (`User.email`) are separate from payslip addresses
+(`Employee.workEmail`), so the short `@oxp.com` logins above keep working regardless.
+
+A payrun sends in concurrent batches of 4 — a Gmail round trip is ~4s, so a
+12-payslip run completes in ~20s rather than the ~50s a serial loop would take.
 
 ---
 
@@ -130,6 +162,21 @@ the employee's schedule; a client cannot post its own hours. Worked hours are th
 check-in→check-out span; overtime is measured net of the configured break against
 scheduled hours. Late is a 15-minute grace on the scheduled start.
 
+### Deleting vs archiving an employee
+
+Deleting an employee cascades away their contracts, attendance and leave, so the
+API refuses it outright once any **payslip** exists — payroll history is a record,
+not a convenience. The UI asks for the employee's name typed back before allowing
+it, and shows exactly what each option destroys.
+
+A delete also removes the **linked login and revokes its sessions**. Without that
+the `User` row survives (`Employee.userId` is `SetNull`) and the account keeps
+authenticating against a person who no longer exists.
+
+`POST /employees/:id/archive` is the reversible alternative: it keeps every record,
+sets the employee `INACTIVE`, deactivates the login and revokes its sessions.
+`POST /employees/:id/restore` undoes it.
+
 ### Payrun workflow
 
 Two-step wizard — step 1 collects scope and previews eligibility, and **nothing is
@@ -145,8 +192,10 @@ check-out) is advisory. A paid payrun cannot be deleted or recomputed.
 
 ```
 POST   /api/auth/login | refresh | logout | change-password    GET /api/auth/me
+POST   /api/auth/forgot-password | reset-password
 GET    /api/org/companies | departments | job-positions
 CRUD   /api/employees                POST /api/employees/:id/user   (admin)
+GET    /api/employees/:id/deletion-impact   POST /api/employees/:id/archive | restore
 CRUD   /api/contracts
 CRUD   /api/working-schedules
 CRUD   /api/attendance               GET/POST /api/attendance/me/status|check-in|check-out
@@ -197,6 +246,8 @@ hidden in the UI.
 ## Known gaps / roadmap
 
 - Email is dry-run until Gmail App Password credentials are set.
+- Password reset relies on email; with SMTP unset the link is surfaced in the UI
+  (development only).
 - Salary structures link out to a filtered rule list rather than editing rules inline.
 - No automated test suite — verification was done through scripted API integration
   runs against a live server.

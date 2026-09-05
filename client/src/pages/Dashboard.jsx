@@ -5,7 +5,7 @@ import {
   AlertTriangle, AlertCircle, Info, Table2, BarChart3,
 } from 'lucide-react';
 import { useFetch } from '../hooks/useApi';
-import { money, compactMoney } from '../lib/format';
+import { money } from '../lib/format';
 import { PageHeader, Spinner, ErrorState, StatusBadge } from '../components/ui';
 import {
   DepartmentCostChart, NetSalaryTrend, AttendanceComposition, LeaveBreakdown,
@@ -16,8 +16,6 @@ const SEVERITY = {
   WARNING: { icon: AlertTriangle, tone: 'border-amber-200 bg-amber-50 text-amber-800' },
   INFO: { icon: Info, tone: 'border-blue-200 bg-blue-50 text-blue-800' },
 };
-
-const monthInput = (d) => new Date(d).toISOString().slice(0, 7);
 
 export default function Dashboard() {
   const [filters, setFilters] = useState({});

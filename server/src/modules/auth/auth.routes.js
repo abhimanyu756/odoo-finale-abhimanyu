@@ -1,6 +1,9 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
+import { env } from '../../config/env.js';
+import { sendMail, mailEnabled } from '../../lib/mailer.js';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, unauthorized } from '../../lib/errors.js';
 import { authenticate } from '../../middleware/auth.js';
@@ -139,6 +142,105 @@ router.post(
     clearRefreshCookie(res);
 
     res.status(204).end();
+  }),
+);
+
+// ------------------------------------------------------ Password reset ----
+const RESET_TTL_MINUTES = 30;
+const hashToken = (raw) => crypto.createHash('sha256').update(raw).digest('hex');
+
+router.post(
+  '/forgot-password',
+  asyncHandler(async (req, res) => {
+    const { email } = z.object({ email: z.string().email() }).parse(req.body);
+
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+      include: { employee: { select: { firstName: true } } },
+    });
+
+    // Always answer the same way. Revealing whether an address has an account
+    // would turn this endpoint into an account-enumeration oracle.
+    const generic = {
+      message: 'If that email has an account, a reset link has been sent.',
+    };
+
+    if (!user || !user.isActive) return res.json(generic);
+
+    // Any earlier unused token is invalidated, so only the newest link works.
+    await prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const raw = crypto.randomBytes(32).toString('hex');
+    await prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(raw),
+        expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60_000),
+      },
+    });
+
+    const link = `${env.clientOrigin}/reset-password?token=${raw}`;
+    await sendMail({
+      to: user.email,
+      subject: 'Reset your PeoplePay360 password',
+      text:
+        `Hello ${user.employee?.firstName ?? ''},\n\n`
+        + 'We received a request to reset your PeoplePay360 password.\n\n'
+        + `Reset link (valid for ${RESET_TTL_MINUTES} minutes):\n${link}\n\n`
+        + 'If you did not request this, you can ignore this email — your password will not change.',
+    });
+
+    // With SMTP unconfigured the mail never leaves, so the link is surfaced in
+    // development only; production returns the generic message alone.
+    if (!mailEnabled() && env.nodeEnv !== 'production') {
+      console.log(`[password-reset] ${user.email} -> ${link}`);
+      return res.json({ ...generic, devResetLink: link });
+    }
+
+    return res.json(generic);
+  }),
+);
+
+router.post(
+  '/reset-password',
+  asyncHandler(async (req, res) => {
+    const { token, newPassword } = z
+      .object({
+        token: z.string().min(1),
+        newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+      })
+      .parse(req.body);
+
+    const record = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash: hashToken(token) },
+      include: { user: true },
+    });
+
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw badRequest('This reset link is invalid or has expired. Request a new one.');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: record.userId },
+        data: { passwordHash: await bcrypt.hash(newPassword, 10), mustReset: false },
+      });
+      await tx.passwordResetToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      });
+      // Resetting a password ends every existing session.
+      await tx.refreshToken.updateMany({
+        where: { userId: record.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    });
+
+    clearRefreshCookie(res);
+    res.json({ message: 'Password updated. You can now sign in.' });
   }),
 );
 

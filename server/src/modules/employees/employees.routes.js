@@ -146,12 +146,113 @@ router.patch(
   }),
 );
 
+// What a delete would destroy, so the UI can warn before it happens.
+const deletionImpact = async (employeeId) => {
+  const [contracts, attendances, leaveRequests, allocations, payslips] = await Promise.all([
+    prisma.contract.count({ where: { employeeId } }),
+    prisma.attendance.count({ where: { employeeId } }),
+    prisma.leaveRequest.count({ where: { employeeId } }),
+    prisma.leaveAllocation.count({ where: { employeeId } }),
+    prisma.payslip.count({ where: { employeeId } }),
+  ]);
+  return {
+    contracts, attendances, leaveRequests, allocations, payslips,
+    // Payroll history is a legal record; an employee who has ever been paid
+    // must be archived rather than erased.
+    canDelete: payslips === 0,
+    blockedReason: payslips
+      ? `This employee has ${payslips} payslip(s). Payroll history cannot be deleted — archive the employee instead.`
+      : null,
+  };
+};
+
+router.get(
+  '/:id/deletion-impact',
+  requireMinRole('HR_MANAGER'),
+  asyncHandler(async (req, res) => {
+    const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
+    if (!employee) throw notFound('Employee not found');
+    res.json(await deletionImpact(req.params.id));
+  }),
+);
+
 router.delete(
   '/:id',
   requireMinRole('HR_MANAGER'),
   asyncHandler(async (req, res) => {
-    await prisma.employee.delete({ where: { id: req.params.id } });
+    const employee = await prisma.employee.findUnique({
+      where: { id: req.params.id },
+      include: { user: true },
+    });
+    if (!employee) throw notFound('Employee not found');
+
+    const impact = await deletionImpact(employee.id);
+    if (!impact.canDelete) throw badRequest(impact.blockedReason, impact);
+
+    await prisma.$transaction(async (tx) => {
+      // Contracts, attendance and leave cascade with the employee. The linked
+      // login does not — without this the account survives and can still
+      // authenticate against a person who no longer exists.
+      await tx.employee.delete({ where: { id: employee.id } });
+      if (employee.userId) {
+        await tx.refreshToken.updateMany({
+          where: { userId: employee.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        await tx.user.delete({ where: { id: employee.userId } });
+      }
+    });
+
     res.status(204).end();
+  }),
+);
+
+// The safe alternative: keeps every record, but ends access immediately.
+router.post(
+  '/:id/archive',
+  requireMinRole('HR_MANAGER'),
+  asyncHandler(async (req, res) => {
+    const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
+    if (!employee) throw notFound('Employee not found');
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (employee.userId) {
+        await tx.user.update({ where: { id: employee.userId }, data: { isActive: false } });
+        await tx.refreshToken.updateMany({
+          where: { userId: employee.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return tx.employee.update({
+        where: { id: employee.id },
+        data: { status: 'INACTIVE' },
+        include: RELATIONS,
+      });
+    });
+
+    res.json(shape(updated));
+  }),
+);
+
+router.post(
+  '/:id/restore',
+  requireMinRole('HR_MANAGER'),
+  asyncHandler(async (req, res) => {
+    const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
+    if (!employee) throw notFound('Employee not found');
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (employee.userId) {
+        await tx.user.update({ where: { id: employee.userId }, data: { isActive: true } });
+      }
+      return tx.employee.update({
+        where: { id: employee.id },
+        data: { status: 'ACTIVE' },
+        include: RELATIONS,
+      });
+    });
+
+    res.json(shape(updated));
   }),
 );
 

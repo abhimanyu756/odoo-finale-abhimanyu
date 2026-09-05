@@ -4,6 +4,8 @@ import { atLeast } from './lib/roles';
 import { Spinner } from './components/ui';
 import AppShell from './components/AppShell';
 import Login from './pages/Login';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Employees from './pages/Employees';
 import EmployeeForm from './pages/EmployeeForm';
 import Contracts from './pages/Contracts';
@@ -49,6 +51,8 @@ export default function App() {
     return (
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
@@ -57,6 +61,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route element={<AppShell />}>
         <Route path="/" element={<Home />} />
 

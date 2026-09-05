@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Wallet, ArrowRight, Check } from 'lucide-react';
+import { Plus, Wallet, ArrowRight } from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
@@ -131,7 +131,8 @@ function PayrunWizard({ onClose, onCreated }) {
   const toggle = (id) =>
     setSelected((s) => {
       const next = new Set(s);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
 

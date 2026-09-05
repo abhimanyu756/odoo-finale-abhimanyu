@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CalendarClock, FileText, Clock, Save, X, UserPlus } from 'lucide-react';
+import {
+  ArrowLeft, CalendarClock, FileText, Clock, Save, X, UserPlus,
+  Trash2, Archive, ArchiveRestore, AlertTriangle,
+} from 'lucide-react';
 import { useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -38,6 +41,7 @@ export default function EmployeeForm() {
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (loading) return <Spinner label="Loading employee" />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
@@ -70,6 +74,19 @@ export default function EmployeeForm() {
       await api.patch(`/employees/${id}`, payload);
       toast.success('Employee updated');
       setEditing(false);
+      refetch();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const archive = async (action) => {
+    setBusy(true);
+    try {
+      await api.post(`/employees/${id}/${action}`);
+      toast.success(action === 'archive' ? 'Employee archived' : 'Employee restored');
       refetch();
     } catch (err) {
       toast.error(errorMessage(err));
@@ -145,6 +162,20 @@ export default function EmployeeForm() {
                       <UserPlus size={14} /> Create Login
                     </button>
                   )}
+                  {employee.status === 'ACTIVE' ? (
+                    <button type="button" className="o-btn-secondary" disabled={busy}
+                      onClick={() => archive('archive')}>
+                      <Archive size={14} /> Archive
+                    </button>
+                  ) : (
+                    <button type="button" className="o-btn-secondary" disabled={busy}
+                      onClick={() => archive('restore')}>
+                      <ArchiveRestore size={14} /> Restore
+                    </button>
+                  )}
+                  <button type="button" className="o-btn-danger" onClick={() => setDeleting(true)}>
+                    <Trash2 size={14} /> Delete
+                  </button>
                   <button type="button" className="o-btn-secondary" onClick={startEdit}>Edit</button>
                 </>
               )}
@@ -272,6 +303,15 @@ export default function EmployeeForm() {
         )}
       </div>
 
+      {deleting && (
+        <DeleteEmployeeModal
+          employee={employee}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => navigate('/employees')}
+          onArchived={() => { setDeleting(false); refetch(); }}
+        />
+      )}
+
       {provisioning && (
         <ProvisionUserModal
           employee={employee}
@@ -337,6 +377,120 @@ function ProvisionUserModal({ employee, onClose, onDone }) {
         </Field>
         {error && <p className="rounded border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{error}</p>}
       </form>
+    </Modal>
+  );
+}
+
+// Deleting an employee erases contracts, attendance and leave with them, so the
+// confirmation states exactly what is destroyed and offers archiving instead.
+function DeleteEmployeeModal({ employee, onClose, onDeleted, onArchived }) {
+  const toast = useToast();
+  const { data: impact, loading } = useFetch(`/employees/${employee.id}/deletion-impact`);
+  const [busy, setBusy] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+
+  const run = async (action) => {
+    setBusy(true);
+    try {
+      if (action === 'delete') {
+        await api.delete(`/employees/${employee.id}`);
+        toast.success(`${employee.name} deleted`);
+        onDeleted();
+      } else {
+        await api.post(`/employees/${employee.id}/archive`);
+        toast.success(`${employee.name} archived`);
+        onArchived();
+      }
+    } catch (err) {
+      toast.error(errorMessage(err));
+      setBusy(false);
+    }
+  };
+
+  const rows = impact
+    ? [
+        ['Contracts', impact.contracts],
+        ['Attendance records', impact.attendances],
+        ['Time off requests', impact.leaveRequests],
+        ['Leave allocations', impact.allocations],
+        ['Payslips', impact.payslips],
+      ]
+    : [];
+
+  const nameMatches = confirmText.trim() === employee.name;
+
+  return (
+    <Modal
+      open
+      title={`Delete ${employee.name}?`}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="o-btn-secondary" onClick={onClose}>Cancel</button>
+          {employee.status === 'ACTIVE' && (
+            <button type="button" className="o-btn-secondary" disabled={busy}
+              onClick={() => run('archive')}>
+              <Archive size={14} /> Archive instead
+            </button>
+          )}
+          <button
+            type="button"
+            className="o-btn-danger"
+            disabled={busy || loading || !impact?.canDelete || !nameMatches}
+            onClick={() => run('delete')}
+          >
+            <Trash2 size={14} /> {busy ? 'Deleting…' : 'Delete permanently'}
+          </button>
+        </>
+      }
+    >
+      {loading ? (
+        <Spinner label="Checking what this would remove" />
+      ) : (
+        <div className="grid gap-3">
+          {!impact?.canDelete && (
+            <div className="flex items-start gap-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>{impact?.blockedReason}</span>
+            </div>
+          )}
+
+          <div>
+            <p className="o-label">This will permanently remove</p>
+            <table className="o-table">
+              <tbody>
+                {rows.map(([label, n]) => (
+                  <tr key={label}>
+                    <td className="text-ink-soft">{label}</td>
+                    <td className="text-right font-medium tabular-nums text-ink">{n}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td className="text-ink-soft">Login account</td>
+                  <td className="text-right font-medium text-ink">
+                    {employee.user ? 'Yes — access revoked' : 'None'}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-xs text-ink-soft">
+            Archiving keeps every record and simply ends access — it is reversible.
+            Deleting is not.
+          </p>
+
+          {impact?.canDelete && (
+            <label className="block">
+              <span className="o-label">
+                Type <strong className="text-ink">{employee.name}</strong> to confirm
+              </span>
+              <input className="o-input" value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)} placeholder={employee.name} />
+            </label>
+          )}
+        </div>
+      )}
     </Modal>
   );
 }

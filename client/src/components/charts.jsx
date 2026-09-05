@@ -1,6 +1,6 @@
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Cell, LabelList,
+  Tooltip, ResponsiveContainer, LabelList,
 } from 'recharts';
 import { compactMoney, money } from '../lib/format';
 

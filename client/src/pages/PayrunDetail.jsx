@@ -31,8 +31,21 @@ export default function PayrunDetail() {
     setBusy(kind);
     try {
       const { data } = await api.post(`/payroll/payruns/${id}/${kind}`);
-      toast.success(`${label} complete`);
-      if (kind === 'send') toast.success(`${data.sent ?? 0} payslip email(s) sent`);
+      if (kind === 'send') {
+        // Say plainly when SMTP is unconfigured rather than reporting a
+        // delivery count for mail that never left the server.
+        if (data.dryRun) {
+          toast.error(
+            `${data.prepared} payslip PDF(s) prepared but NOT sent — SMTP credentials are not configured`,
+          );
+        } else {
+          toast.success(`${data.sent} payslip email(s) sent`);
+        }
+        if (data.skipped?.length) toast.error(`${data.skipped.length} skipped (no work email)`);
+        if (data.failed?.length) toast.error(`${data.failed.length} failed to send`);
+      } else {
+        toast.success(`${label} complete`);
+      }
       refetch();
     } catch (err) {
       toast.error(errorMessage(err));
