@@ -5,6 +5,8 @@ import { asyncHandler, badRequest, forbidden, notFound } from '../../lib/errors.
 import { authenticate, requireMinRole, isPayroll } from '../../middleware/auth.js';
 import { listQuerySchema, paginate, listResponse, num } from '../../lib/http.js';
 import { contractForPeriod } from '../contracts/contracts.service.js';
+import { renderPayslipPdf } from './payslip.pdf.js';
+import { sendMail, mailEnabled } from '../../lib/mailer.js';
 import {
   eligibleEmployees,
   nextPayslipNumber,
@@ -341,6 +343,114 @@ router.get(
     }
 
     res.json({ ...slipShape(row), contract: { ...row.contract, wage: num(row.contract.wage) } });
+  }),
+);
+
+// ----------------------------------------------------- PDF & delivery ----
+const PDF_INCLUDE = {
+  employee: {
+    include: {
+      company: { select: { name: true } },
+      department: { select: { name: true } },
+      jobPosition: { select: { name: true } },
+    },
+  },
+  contract: { select: { reference: true, wage: true } },
+  payrun: { select: { name: true, structure: { select: { name: true } } } },
+  lines: { orderBy: { sequence: 'asc' } },
+};
+
+const loadForPdf = (where) => prisma.payslip.findFirst({ where, include: PDF_INCLUDE });
+
+router.get(
+  '/payslips/:id/pdf',
+  asyncHandler(async (req, res) => {
+    const slip = await loadForPdf({ id: req.params.id });
+    if (!slip) throw notFound('Payslip not found');
+
+    // Employees may print only their own payslip.
+    if (!isPayroll(req.user.role)) {
+      const own = await prisma.employee.findFirst({
+        where: { id: slip.employeeId, userId: req.user.id },
+        select: { id: true },
+      });
+      if (!own) throw forbidden();
+    }
+
+    const pdf = await renderPayslipPdf(slip);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${slip.number.replace(/\//g, '-')}.pdf"`,
+    );
+    res.send(pdf);
+  }),
+);
+
+const mailBody = (slip) => {
+  const period = new Date(slip.periodStart).toLocaleDateString('en-IN', {
+    month: 'long', year: 'numeric',
+  });
+  const net = Number(slip.net).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+  return {
+    subject: `Payslip for ${period} — ${slip.number}`,
+    text:
+      `Hello ${slip.employee.firstName},\n\n`
+      + `Your payslip for ${period} is attached.\n\n`
+      + `Payslip: ${slip.number}\nNet salary: INR ${net}\n\n`
+      + 'This is an automated message from PeoplePay360.',
+  };
+};
+
+// Bulk delivery from the payrun screen: one PDF per payslip, attached and sent.
+router.post(
+  '/payruns/:id/send',
+  canFinalise,
+  asyncHandler(async (req, res) => {
+    const payrun = await prisma.payrun.findUnique({ where: { id: req.params.id } });
+    if (!payrun) throw notFound('Payrun not found');
+    if (!['VALIDATED', 'PAID'].includes(payrun.status)) {
+      throw badRequest('Only a validated or paid payrun can be sent');
+    }
+
+    const slips = await prisma.payslip.findMany({
+      where: { payrunId: payrun.id },
+      include: PDF_INCLUDE,
+    });
+
+    const results = { sent: 0, skipped: [], failed: [] };
+
+    for (const slip of slips) {
+      if (!slip.employee.workEmail) {
+        results.skipped.push({ payslip: slip.number, reason: 'No work email' });
+        continue;
+      }
+      try {
+        const pdf = await renderPayslipPdf(slip);
+        const { subject, text } = mailBody(slip);
+        await sendMail({
+          to: slip.employee.workEmail,
+          subject,
+          text,
+          attachments: [{ filename: `${slip.number.replace(/\//g, '-')}.pdf`, content: pdf }],
+        });
+        await prisma.payslip.update({
+          where: { id: slip.id },
+          data: { emailSentAt: new Date() },
+        });
+        results.sent += 1;
+      } catch (err) {
+        results.failed.push({ payslip: slip.number, reason: err.message });
+      }
+    }
+
+    await prisma.payrun.update({ where: { id: payrun.id }, data: { sentAt: new Date() } });
+
+    res.json({
+      ...results,
+      // Surfaced so the UI can tell the user nothing actually left the building.
+      dryRun: !mailEnabled(),
+    });
   }),
 );
 

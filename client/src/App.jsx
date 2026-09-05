@@ -1,122 +1,87 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { useAuth } from './context/AuthContext';
+import { atLeast } from './lib/roles';
+import { Spinner } from './components/ui';
+import AppShell from './components/AppShell';
+import Login from './pages/Login';
+import Employees from './pages/Employees';
+import EmployeeForm from './pages/EmployeeForm';
+import Contracts from './pages/Contracts';
+import Attendance from './pages/Attendance';
+import WorkingSchedules from './pages/WorkingSchedules';
+import TimeOffRequests from './pages/TimeOffRequests';
+import TimeOffAllocations from './pages/TimeOffAllocations';
+import TimeOffTypes from './pages/TimeOffTypes';
+import SalaryStructures from './pages/SalaryStructures';
+import SalaryRules from './pages/SalaryRules';
+import Payruns from './pages/Payruns';
+import PayrunDetail from './pages/PayrunDetail';
+import Payslips from './pages/Payslips';
+import PayslipDetail from './pages/PayslipDetail';
+import Dashboard from './pages/Dashboard';
+import Users from './pages/Users';
 
-function App() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+// Blocks a route the current role cannot reach, rather than letting the page
+// mount and fail with a 403 from every request it makes.
+function Guard({ min, children }) {
+  const { role } = useAuth();
+  if (!atLeast(role, min)) return <Navigate to="/employees" replace />;
+  return children;
 }
 
-export default App
+function Home() {
+  const { role } = useAuth();
+  return <Navigate to={atLeast(role, 'HR_PAYROLL_USER') ? '/payroll/dashboard' : '/employees'} replace />;
+}
+
+export default function App() {
+  const { user, booting } = useAuth();
+
+  if (booting) {
+    return (
+      <div className="grid min-h-screen place-items-center">
+        <Spinner label="Starting PeoplePay360" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route element={<AppShell />}>
+        <Route path="/" element={<Home />} />
+
+        <Route path="/employees" element={<Employees />} />
+        <Route path="/employees/:id" element={<EmployeeForm />} />
+
+        <Route path="/contracts" element={<Guard min="HR_MANAGER"><Contracts /></Guard>} />
+        <Route path="/attendance" element={<Attendance />} />
+        <Route path="/working-schedules" element={<Guard min="HR_MANAGER"><WorkingSchedules /></Guard>} />
+
+        <Route path="/time-off/requests" element={<TimeOffRequests />} />
+        <Route path="/time-off/allocations" element={<TimeOffAllocations />} />
+        <Route path="/time-off/types" element={<Guard min="HR_MANAGER"><TimeOffTypes /></Guard>} />
+
+        <Route path="/payroll/dashboard" element={<Guard min="HR_PAYROLL_USER"><Dashboard /></Guard>} />
+        <Route path="/payroll/payruns" element={<Guard min="HR_PAYROLL_USER"><Payruns /></Guard>} />
+        <Route path="/payroll/payruns/:id" element={<Guard min="HR_PAYROLL_USER"><PayrunDetail /></Guard>} />
+        <Route path="/payroll/payslips" element={<Payslips />} />
+        <Route path="/payroll/payslips/:id" element={<PayslipDetail />} />
+        <Route path="/payroll/structures" element={<Guard min="HR_PAYROLL_USER"><SalaryStructures /></Guard>} />
+        <Route path="/payroll/rules" element={<Guard min="HR_PAYROLL_USER"><SalaryRules /></Guard>} />
+
+        <Route path="/admin/users" element={<Guard min="ADMIN"><Users /></Guard>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
