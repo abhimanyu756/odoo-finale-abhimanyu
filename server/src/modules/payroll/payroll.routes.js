@@ -81,11 +81,11 @@ const runShape = (p) => ({
   warningCount: p.warnings ? p.warnings.length : undefined,
   errorCount: p.warnings ? p.warnings.filter((w) => w.severity === 'ERROR').length : undefined,
   totals: p.payslips
-    ? {
-        gross: Number(p.payslips.reduce((s, x) => s + Number(x.gross), 0).toFixed(2)),
-        deduction: Number(p.payslips.reduce((s, x) => s + Number(x.deduction), 0).toFixed(2)),
-        net: Number(p.payslips.reduce((s, x) => s + Number(x.net), 0).toFixed(2)),
-      }
+    ? (() => {
+        const live = p.payslips.filter((x) => x.status !== 'CANCELLED');
+        const sum = (k) => Number(live.reduce((s, x) => s + Number(x[k]), 0).toFixed(2));
+        return { gross: sum('gross'), deduction: sum('deduction'), net: sum('net') };
+      })()
     : undefined,
   _count: undefined,
 });
@@ -741,6 +741,40 @@ const PDF_INCLUDE = {
 };
 
 const loadForPdf = (where) => prisma.payslip.findFirst({ where, include: PDF_INCLUDE });
+
+// Voids a payslip without erasing it.
+//
+// Deleting is only right before validation, when the roster was simply wrong.
+// After that a payslip is a financial record, and the way to retract one is to
+// cancel it: the row, its lines and its figures all survive for audit, but it
+// stops counting toward the payrun totals and stops triggering the duplicate
+// warning - which is exactly how an overlapping payslip gets resolved on a run
+// that has already been validated or paid.
+router.post(
+  '/payslips/:id/cancel',
+  canFinalise,
+  asyncHandler(async (req, res) => {
+    const { reason } = z.object({ reason: z.string().max(500).nullish() }).parse(req.body ?? {});
+
+    const slip = await prisma.payslip.findUnique({
+      where: { id: req.params.id },
+      include: { payrun: true },
+    });
+    if (!slip) throw notFound('Payslip not found');
+    if (slip.status === 'CANCELLED') throw badRequest('This payslip is already cancelled');
+
+    const updated = await prisma.payslip.update({
+      where: { id: slip.id },
+      data: { status: 'CANCELLED' },
+      include: PAYSLIP_DETAIL,
+    });
+
+    // Recollect so a DUPLICATE_PAYSLIP raised against this slip clears at once.
+    await persistWarnings(slip.payrunId, await collectWarnings(slip.payrun));
+
+    res.json({ ...slipShape(updated), cancelReason: reason ?? null });
+  }),
+);
 
 router.get(
   '/payslips/:id/pdf',

@@ -4,7 +4,7 @@ An integrated HR and payroll operations platform: employee master data, contract
 working schedules, attendance, time off, a configurable salary-rule engine, payruns,
 payslip PDFs, bulk email delivery, and a live payroll dashboard.
 
-Built for **Odoo Hackathon 2026** (Team 375).
+Built by **Abhimanyu Kumar** for **Odoo Hackathon 2026** (Team 375).
 
 ---
 
@@ -35,7 +35,7 @@ cd server
 npm install
 cp .env.example .env                 # then set DATABASE_URL + JWT secrets
 npm run migrate                      # apply migrations
-npm run seed                         # demo data (13 employees, 3 payruns, 783 attendance rows)
+npm run seed                         # small demo set (13 employees, 3 payruns)
 npm run dev                          # http://localhost:4000
 
 # 3. Frontend (separate terminal)
@@ -62,10 +62,10 @@ npm run data:bulk:dry     # report what it would create
 npm run data:bulk         # top up to 200 employees + the payroll history
 ```
 
-Current scale: 200 employees / 194 users across 5 roles, 12 departments,
-24 job positions, 9 working schedules, 308 contracts, ~11k attendance rows,
-10 time off types, ~1.2k allocations, ~350 requests, 5 salary structures,
-48 salary rules, 46 payruns, ~1.5k payslips and ~14k payslip lines.
+Current scale: **200 employees / 195 users** across 5 roles, 12 departments,
+24 job positions, 11 working schedules, 308 contracts, **~11k attendance rows**,
+10 time off types, ~1.2k allocations, ~360 requests, 6 salary structures,
+49 salary rules, **49 payruns**, ~1.5k payslips and **~15k payslip lines**.
 
 Payslips are generated through the app's own rule engine (`buildContext` /
 `runRules`), so pressing **Recompute** in the UI reproduces exactly the stored
@@ -232,6 +232,16 @@ recovery path if they do:
 - Changing a role, deactivating an account or resetting a password **revokes every
   refresh token** for that user, so the old access level cannot outlive the change.
 
+### Salary structures
+
+A structure is a container, so its form shows what it contains: every rule in
+execution order with a plain-English summary of what each computes
+(`₹150 x 20`, `50% of WAGE`, `min(categories.BASIC * 0.12, 1800)`), inactive
+rules greyed out. The list separates **Employees** (people a structure pays
+today, derived from running contracts) from **Contracts** (every contract ever
+written against it) — the two differ by roughly 2x, since most employees carry an
+expired contract alongside their current one.
+
 ### Payrun workflow
 
 Two-step wizard — step 1 collects scope and previews eligibility, and **nothing is
@@ -240,6 +250,51 @@ with guards at each transition. Warnings are collected on compute and surfaced o
 the payrun screen: `ERROR` severity (duplicate payslip, negative net, no running
 contract) **blocks** validation; `WARNING` severity (missing bank details, missing
 check-out) is advisory. A paid payrun cannot be deleted or recomputed.
+
+### Interactive dashboard
+
+Every headline metric can be sliced along any axis and drilled into, rather than
+being a static picture:
+
+- **Group by** Department, Job Position, Employee Type or Work Location on the
+  salary and time-off charts.
+- **Click any bar, attendance band or leave type** to open a drill-down panel
+  scoped to that slice. The panel keeps a breadcrumb trail — each click adds one
+  filter, so `All → Finance → Data Analyst` is the same question asked of a
+  smaller population — and can pivot between salary, attendance and time off
+  without leaving the slice.
+- **"Apply to dashboard"** turns a drill trail into page-wide filters; applied
+  filters show as removable chips with a single Reset.
+- Clicking a month on the trend line filters the whole dashboard to that period.
+
+One endpoint (`/api/dashboard/drilldown`) serves all of it: each level down is
+the same aggregation with one more filter, so the drill never runs out of depth.
+
+### Editable payrun roster
+
+A payrun is not frozen the moment it is created:
+
+| Operation | When it is allowed | Why |
+|---|---|---|
+| Rename the run | always | a label is not financial data |
+| Change period / structure | `DRAFT` only | they define what the payslips were computed from |
+| Add employees | `DRAFT` / `COMPUTED` | forgetting someone should not mean rebuilding the run; adding drops the run back to `DRAFT` so it cannot claim to be computed with uncomputed rows |
+| Remove a payslip | `DRAFT` / `COMPUTED` | the roster was wrong |
+| **Cancel** a payslip | `COMPUTED` / `VALIDATED` / `PAID` | after validation a payslip records money that moved — cancelling voids it without erasing it, drops it from the run totals, and clears its duplicate warning |
+| Delete the run | not when `PAID` | paid runs are historical records |
+
+### Segregation of duties
+
+Approval is a control, so it is never self-applied:
+
+- Nobody can approve or refuse **their own** time off request or allocation —
+  admins included. The answer is a second approver, not an exemption.
+- Nobody can change **their own** role or deactivate their own account.
+- `TimeOffType.approvalMode` is enforced rather than merely stored:
+  `MANAGER` means the employee's own line manager (a per-employee relationship,
+  so a manager who is a plain `EMPLOYEE` can still act), `OFFICER` means an HR
+  officer **or** that employee's named **HR Responsible**, and `NONE`
+  auto-approves on submission.
 
 ---
 
@@ -258,12 +313,21 @@ CRUD   /api/working-schedules
 CRUD   /api/attendance               GET/POST /api/attendance/me/status|check-in|check-out
 CRUD   /api/time-off/types | allocations | requests             GET /api/time-off/balances
 POST   /api/time-off/requests/:id/approve | refuse
+CRUD   /api/org/departments  (hr)
 CRUD   /api/salary/structures | rules    POST /api/salary/rules/validate
+GET    /api/salary/rules-meta            (variables, functions, worked examples)
 GET    /api/payroll/payruns/eligible     CRUD /api/payroll/payruns
+PATCH  /api/payroll/payruns/:id          (rename always; period/structure while DRAFT)
+POST   /api/payroll/payruns/:id/payslips (add employees to an existing run)
 POST   /api/payroll/payruns/:id/compute | validate | mark-paid | send
 GET    /api/payroll/payslips             GET /api/payroll/payslips/:id/pdf
-GET    /api/dashboard
+DELETE /api/payroll/payslips/:id         (remove a row before validation)
+POST   /api/payroll/payslips/:id/cancel  (void after validation, keeps the record)
+GET    /api/dashboard                    GET /api/dashboard/drilldown
 ```
+
+Every list endpoint accepts `?page=&limit=&search=&sortBy=&sortDir=`, and the
+date-bearing ones accept `?year=&month=`.
 
 ### Roles
 
@@ -297,6 +361,18 @@ hidden in the UI.
 4. Sign in as `sara@odoo.com` (HR Manager) and approve it; the balance drops.
    Request more than the balance and approval is refused with the exact shortfall.
 5. Note that Sara has no Payroll menu at all — role separation is enforced server-side.
+6. Try to approve **your own** request as Sara — refused. Segregation of duties
+   applies to admins too.
+
+**Scenario C — the dashboard is a tool, not a picture**
+1. Payroll → Dashboard. Switch **Salary Cost** from Department to **Job Position**.
+2. Click the **Finance** bar → drill panel opens scoped to Finance. Switch the tab
+   to **Attendance** — same slice, different metric. Group by Job Position and
+   click again: the breadcrumb reads `All → Finance → Data Analyst`.
+3. **Apply to dashboard** — every KPI, chart and table narrows to that slice, with
+   removable filter chips. **Reset filters** returns to the full view.
+4. Click the **Late** band on Attendance Overview → the employees behind the
+   number, ranked.
 
 ---
 
@@ -305,9 +381,12 @@ hidden in the UI.
 - Email is dry-run until Gmail App Password credentials are set.
 - Password reset relies on email; with SMTP unset the link is surfaced in the UI
   (development only).
-- Salary structures link out to a filtered rule list rather than editing rules inline.
 - No automated test suite — verification was done through scripted API integration
-  runs against a live server.
+  runs against a live server, asserting on real data rather than fixtures.
 - Attendance has no calendar view; the mockup's Working Schedule "Calendar" tab is
   not implemented (List view is).
-- Multi-company exists in the schema but the UI assumes a single company.
+- Multi-company exists in the schema and is filterable on the dashboard, but the
+  rest of the UI assumes a single company.
+- A cancelled payslip cannot be reopened; cancelling is one-way.
+- Users hold a single role rather than a set. The roles are hierarchical, so a
+  higher role already implies the lower ones.

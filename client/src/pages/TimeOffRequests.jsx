@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, CalendarClock, Check, X, Search } from 'lucide-react';
+import { Plus, CalendarClock, Check, X, Search, Users } from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -54,9 +54,11 @@ export default function TimeOffRequests() {
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
           <input className="o-input pl-8" placeholder="Search by employee, type or reason…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
         <select className="o-input w-auto"
+          value={list.params.status ?? ''}
           onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
           {['TO_APPROVE', 'APPROVED', 'REFUSED', 'CANCELLED'].map((s) => (
@@ -71,6 +73,21 @@ export default function TimeOffRequests() {
             ...(types ?? []).map((t) => ({ value: t.id, label: t.name }))]}
           searchPlaceholder="Search types…"
         />
+        {/* "My Team" from the mockup: a manager's own direct reports. */}
+        {isHr(role) && (
+          <button
+            type="button"
+            onClick={() => list.setParam({ scope: list.params.scope === 'team' ? undefined : 'team' })}
+            className={`o-badge border px-2.5 py-1.5 text-xs transition-colors ${
+              list.params.scope === 'team'
+                ? 'border-odoo-300 bg-odoo-50 text-odoo-700'
+                : 'border-hairline bg-white text-ink-soft hover:bg-odoo-50'}`}
+            title="Show only requests from employees who report to me"
+          >
+            <Users size={13} />
+            My Team
+          </button>
+        )}
         <PeriodFilter
           year={list.params.year}
           month={list.params.month}

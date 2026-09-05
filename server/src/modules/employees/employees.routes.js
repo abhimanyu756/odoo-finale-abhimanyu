@@ -15,6 +15,7 @@ const RELATIONS = {
   jobPosition: { select: { id: true, name: true } },
   workingSchedule: { select: { id: true, name: true, hoursPerWeek: true } },
   manager: { select: { id: true, firstName: true, lastName: true } },
+  hrResponsible: { select: { id: true, firstName: true, lastName: true } },
   user: { select: { id: true, email: true, role: true, isActive: true } },
 };
 
@@ -25,6 +26,9 @@ const shape = (e) => ({
     ? { ...e.workingSchedule, hoursPerWeek: Number(e.workingSchedule.hoursPerWeek) }
     : null,
   manager: e.manager ? { id: e.manager.id, name: `${e.manager.firstName} ${e.manager.lastName}` } : null,
+  hrResponsible: e.hrResponsible
+    ? { id: e.hrResponsible.id, name: `${e.hrResponsible.firstName} ${e.hrResponsible.lastName}` }
+    : null,
 });
 
 // Employees see only their own record; HR and above see everyone.
@@ -37,10 +41,28 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
-    const { departmentId, status, employeeType } = req.query;
+    const { departmentId, status, employeeType, scope } = req.query;
+
+    // "My Team": the requester's own direct reports.
+    //
+    // This deliberately replaces the default scope rather than narrowing it. A
+    // line manager is usually a plain EMPLOYEE, and the default restricts them
+    // to their own record - intersecting the two would return nobody, which is
+    // exactly the case this view exists to serve. Widening is safe because the
+    // filter can only ever match people who report to the requester.
+    //
+    // A user with no employee record manages nobody, so it must match nothing
+    // rather than fall through to everyone.
+    let teamFilter;
+    if (scope === 'team') {
+      const me = await prisma.employee.findFirst({
+        where: { userId: req.user.id }, select: { id: true },
+      });
+      teamFilter = { managerId: me?.id ?? '__none__' };
+    }
 
     const where = {
-      ...scopeFor(req),
+      ...(teamFilter ?? scopeFor(req)),
       ...(departmentId ? { departmentId } : {}),
       ...(status ? { status } : {}),
       ...(employeeType ? { employeeType } : {}),
@@ -114,6 +136,7 @@ const employeeSchema = z.object({
   jobPositionId: z.string().uuid().nullish(),
   workingScheduleId: z.string().uuid().nullish(),
   managerId: z.string().uuid().nullish(),
+  hrResponsibleId: z.string().uuid().nullish(),
 });
 
 router.post(
@@ -136,6 +159,9 @@ router.patch(
     const data = toPatchSchema(employeeSchema).parse(req.body);
     if (data.managerId && data.managerId === req.params.id) {
       throw badRequest('An employee cannot be their own manager');
+    }
+    if (data.hrResponsibleId && data.hrResponsibleId === req.params.id) {
+      throw badRequest('An employee cannot be their own HR responsible');
     }
     const updated = await prisma.employee.update({
       where: { id: req.params.id },

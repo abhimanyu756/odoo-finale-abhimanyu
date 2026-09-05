@@ -4,7 +4,14 @@ import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, notFound } from '../../lib/errors.js';
 import { authenticate, requireMinRole, isHr } from '../../middleware/auth.js';
 import { listQuerySchema, paginate, listResponse, num, toPatchSchema } from '../../lib/http.js';
+import { periodWindow } from '../../lib/dates.js';
 import { nextReference, assertNoOverlap } from './contracts.service.js';
+
+const contractFilterSchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  expiringDays: z.coerce.number().int().min(1).max(365).optional(),
+});
 
 const router = Router();
 router.use(authenticate);
@@ -29,12 +36,34 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
-    const { employeeId, status } = req.query;
+    const {
+      employeeId, status, departmentId, jobPositionId, salaryStructureId, workingScheduleId,
+    } = req.query;
+    const f = contractFilterSchema.parse(req.query);
+
+    // A contract is dated by when it starts, matching how the list is sorted.
+    const window = periodWindow(f.year, f.month);
+
+    // "Expiring" is the operational question this screen exists to answer -
+    // which running contracts run out soon and need renewing. Open-ended ones
+    // (endDate null) never expire, so the null check excludes them.
+    const now = new Date();
+    const expiringBefore = f.expiringDays
+      ? new Date(now.getTime() + f.expiringDays * 86400000)
+      : null;
 
     const where = {
       ...(isHr(req.user.role) ? {} : { employee: { userId: req.user.id } }),
       ...(employeeId ? { employeeId } : {}),
       ...(status ? { status } : {}),
+      ...(departmentId ? { departmentId } : {}),
+      ...(jobPositionId ? { jobPositionId } : {}),
+      ...(salaryStructureId ? { salaryStructureId } : {}),
+      ...(workingScheduleId ? { workingScheduleId } : {}),
+      ...(window ? { startDate: window } : {}),
+      ...(expiringBefore
+        ? { status: 'RUNNING', endDate: { not: null, gte: now, lte: expiringBefore } }
+        : {}),
       ...(q.search
         ? {
             OR: [

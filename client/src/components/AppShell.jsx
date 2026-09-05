@@ -10,8 +10,23 @@ import AttendanceWidget from './AttendanceWidget';
 // Time Off, Payroll — with dropdowns where the mockup shows a caret.
 const navFor = (role) => {
   const items = [];
-  items.push({ label: 'Employees', to: '/employees' });
-  if (isHr(role)) items.push({ label: 'Contracts', to: '/contracts' });
+  // The mockup's "Menus under Employees" annotation groups the people-master
+  // screens under one caret: Employees, Contracts, Departments, Working
+  // Schedules. A plain employee sees only their own record, so for them it
+  // stays a single link rather than a dropdown with one item.
+  if (isHr(role)) {
+    items.push({
+      label: 'Employees',
+      children: [
+        { label: 'Employees', to: '/employees' },
+        { label: 'Contracts', to: '/contracts' },
+        { label: 'Departments', to: '/departments' },
+        { label: 'Working Schedules', to: '/working-schedules' },
+      ],
+    });
+  } else {
+    items.push({ label: 'Employees', to: '/employees' });
+  }
   items.push({ label: 'Attendance', to: '/attendance' });
   items.push({
     label: 'Time Off',
@@ -35,8 +50,7 @@ const navFor = (role) => {
   } else {
     items.push({ label: 'My Payslips', to: '/payroll/payslips' });
   }
-  if (isHr(role)) items.push({ label: 'Schedules', to: '/working-schedules' });
-  if (isAdmin(role)) items.push({ label: 'Users', to: '/admin/users' });
+  if (isAdmin(role)) items.push({ label: 'User Access', to: '/admin/users' });
   return items;
 };
 

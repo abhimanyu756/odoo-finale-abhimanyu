@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Plus, Trash2, CalendarRange, Search } from 'lucide-react';
 import { useList } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
-import { titleCase } from '../lib/format';
+import { titleCase, timeZoneOptions, localTimeZone } from '../lib/format';
 import {
   PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, PagerBar,
+  SearchSelect,
 } from '../components/ui';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -37,6 +38,7 @@ export default function WorkingSchedules() {
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
           <input className="o-input pl-8" placeholder="Search schedules…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
         <select
@@ -120,6 +122,24 @@ function ScheduleModal({ schedule, onClose, onSaved }) {
     timezone: schedule.timezone ?? 'Asia/Kolkata',
     isActive: schedule.isActive ?? true,
   });
+  // Built once and reused: enumerating and offset-formatting 400+ zones on every
+  // keystroke would make the search feel sluggish.
+  const zoneOptions = useMemo(() => {
+    const all = timeZoneOptions();
+    const local = localTimeZone();
+    const mine = all.find((z) => z.value === local);
+    // The current value may be a zone this browser does not enumerate; keep it
+    // so opening an existing schedule never silently blanks the field.
+    const current = all.some((z) => z.value === form.timezone)
+      ? null
+      : { value: form.timezone, label: form.timezone, hint: 'saved value' };
+    return [
+      ...(current ? [current] : []),
+      ...(mine ? [{ ...mine, label: `${mine.label} (your timezone)` }] : []),
+      ...all.filter((z) => z.value !== local),
+    ];
+  }, [form.timezone]);
+
   const [lines, setLines] = useState(
     (schedule.lines ?? []).map((l) => ({
       dayOfWeek: l.dayOfWeek, startTime: l.startTime, endTime: l.endTime,
@@ -194,9 +214,14 @@ function ScheduleModal({ schedule, onClose, onSaved }) {
               ))}
             </select>
           </Field>
-          <Field label="Timezone">
-            <input className="o-input" value={form.timezone}
-              onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))} />
+          <Field label="Timezone" hint="Start and end times below are read in this zone">
+            <SearchSelect
+              value={form.timezone}
+              onChange={(v) => setForm((f) => ({ ...f, timezone: v }))}
+              placeholder="Select a timezone"
+              searchPlaceholder="Search 400+ zones…"
+              options={zoneOptions}
+            />
           </Field>
         </div>
 

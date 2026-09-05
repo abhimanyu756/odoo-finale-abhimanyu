@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Search, FileText } from 'lucide-react';
+import { Plus, Search, FileText, AlertTriangle } from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { money, date } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, SearchSelect, PagerBar } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, SearchSelect, PagerBar, PeriodFilter } from '../components/ui';
 
 const STATUSES = ['DRAFT', 'RUNNING', 'EXPIRED', 'CANCELLED'];
 
@@ -13,6 +13,9 @@ export default function Contracts() {
   const [sp] = useSearchParams();
   const employeeId = sp.get('employeeId') ?? undefined;
   const list = useList('/contracts', { employeeId });
+  const { data: filterDepts } = useFetch('/org/departments');
+  const { data: filterPositions } = useFetch('/org/job-positions');
+  const { data: filterStructures } = useFetch('/salary/structures', { params: { limit: 1000 } });
   const [editing, setEditing] = useState(null);
 
   return (
@@ -31,12 +34,60 @@ export default function Contracts() {
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
           <input className="o-input pl-8" placeholder="Search contracts…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
-        <select className="o-input w-auto" onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
+        <select className="o-input w-auto" value={list.params.status ?? ''}
+          onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s[0] + s.slice(1).toLowerCase()}</option>)}
         </select>
+        <SearchSelect
+          className="w-auto min-w-40"
+          value={list.params.departmentId ?? ''}
+          onChange={(v) => list.setParam({ departmentId: v || undefined })}
+          searchPlaceholder="Search departments…"
+          options={[{ value: '', label: 'All departments' },
+            ...(filterDepts ?? []).map((d) => ({ value: d.id, label: d.name }))]}
+        />
+        <SearchSelect
+          className="w-auto min-w-40"
+          value={list.params.jobPositionId ?? ''}
+          onChange={(v) => list.setParam({ jobPositionId: v || undefined })}
+          searchPlaceholder="Search positions…"
+          options={[{ value: '', label: 'All positions' },
+            ...(filterPositions ?? []).map((p) => ({ value: p.id, label: p.name }))]}
+        />
+        <SearchSelect
+          className="w-auto min-w-44"
+          value={list.params.salaryStructureId ?? ''}
+          onChange={(v) => list.setParam({ salaryStructureId: v || undefined })}
+          searchPlaceholder="Search structures…"
+          options={[{ value: '', label: 'All structures' },
+            ...(filterStructures?.rows ?? []).map((x) => ({ value: x.id, label: x.name, hint: x.code }))]}
+        />
+        {/* Which running contracts run out soon - the reason to open this screen
+            when the dashboard raises a "contracts expiring" alert. */}
+        <button
+          type="button"
+          onClick={() => list.setParam({
+            expiringDays: list.params.expiringDays ? undefined : 30,
+            ...(list.params.expiringDays ? {} : { status: undefined }),
+          })}
+          className={`o-badge border px-2.5 py-1.5 text-xs transition-colors ${
+            list.params.expiringDays
+              ? 'border-amber-300 bg-amber-100 text-amber-800'
+              : 'border-hairline bg-white text-ink-soft hover:bg-amber-50'}`}
+          title="Running contracts ending within 30 days"
+        >
+          <AlertTriangle size={13} />
+          Expiring soon
+        </button>
+        <PeriodFilter
+          year={list.params.year}
+          month={list.params.month}
+          onChange={(v) => list.setParam(v)}
+        />
         <PagerBar page={list.page} pages={list.pages} total={list.total}
           limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>

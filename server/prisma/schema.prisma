@@ -34,6 +34,7 @@ model User {
   refreshTokens    RefreshToken[]
   resetTokens      PasswordResetToken[]
   approvedLeave    LeaveRequest[]       @relation("LeaveApprover")
+  approvedAllocs   LeaveAllocation[]    @relation("AllocationApprover")
   editedAttendance Attendance[]         @relation("AttendanceEditor")
 
   @@index([role])
@@ -156,6 +157,13 @@ model Employee {
   manager   Employee?  @relation("EmployeeManager", fields: [managerId], references: [id])
   reports   Employee[] @relation("EmployeeManager")
 
+  // The HR person who owns this employee's file - Odoo's hr_responsible_id.
+  // Distinct from the manager: a manager runs the work, HR runs the employment.
+  // For OFFICER-approval leave types this is the named officer for the case.
+  hrResponsibleId String?
+  hrResponsible   Employee?  @relation("EmployeeHrResponsible", fields: [hrResponsibleId], references: [id])
+  hrResponsibleFor Employee[] @relation("EmployeeHrResponsible")
+
   contracts     Contract[]
   attendances   Attendance[]
   leaveRequests LeaveRequest[]
@@ -165,6 +173,7 @@ model Employee {
   @@index([departmentId])
   @@index([status])
   @@index([employeeType])
+  @@index([hrResponsibleId])
 }
 
 // ---------------------------------------------------------------------------
@@ -352,11 +361,16 @@ model LeaveAllocation {
   validFrom     DateTime
   validTo       DateTime?
   notes         String?
+  // Who granted this balance. A leave request records its approver; an
+  // allocation is the same kind of decision and needs the same audit trail.
+  approvedById  String?
+  approvedAt    DateTime?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
   employee    Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   timeOffType TimeOffType    @relation(fields: [timeOffTypeId], references: [id])
+  approvedBy  User?          @relation("AllocationApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   // Approved requests link here so "taken" and "remaining" are derived, not stored.
   requests    LeaveRequest[]
 

@@ -93,6 +93,7 @@ const allocShape = (a) => ({
   ...a,
   amount: num(a.amount),
   employee: named(a.employee),
+  approvedBy: approverName(a.approvedBy),
 });
 
 router.get(
@@ -131,7 +132,7 @@ router.get(
         orderBy: q.sortBy
           ? [{ [q.sortBy]: q.sortDir }, { createdAt: 'desc' }]
           : [{ createdAt: 'desc' }],
-        include: { employee: EMP, timeOffType: true },
+        include: { employee: EMP, timeOffType: true, approvedBy: APPROVER },
       }),
       prisma.leaveAllocation.count({ where }),
     ]);
@@ -158,14 +159,26 @@ const allocationSchema = z.object({
   status: z.enum(['DRAFT', 'TO_APPROVE', 'APPROVED', 'REFUSED', 'CANCELLED']).default('DRAFT'),
 });
 
+// Any write that lands an allocation on APPROVED stamps who did it. Moving it
+// back off APPROVED clears the stamp, so a re-approval cannot inherit a stale
+// approver.
+const approvalStamp = (status, req) => {
+  if (status === 'APPROVED') return { approvedById: req.user.id, approvedAt: new Date() };
+  if (status) return { approvedById: null, approvedAt: null };
+  return {};
+};
+
 router.post(
   '/allocations',
   requireMinRole('HR_MANAGER'),
   asyncHandler(async (req, res) => {
     const data = allocationSchema.parse(req.body);
     const row = await prisma.leaveAllocation.create({
-      data,
-      include: { employee: EMP, timeOffType: true },
+      // Creating one already set to APPROVED is an approval - it just skips the
+      // approve endpoint - so the creator is recorded as the approver. Without
+      // this the form reads "Not approved yet" on an approved allocation.
+      data: { ...data, ...approvalStamp(data.status, req) },
+      include: { employee: EMP, timeOffType: true, approvedBy: APPROVER },
     });
     res.status(201).json(allocShape(row));
   }),
@@ -178,8 +191,9 @@ router.patch(
     const data = toPatchSchema(allocationSchema).parse(req.body);
     const row = await prisma.leaveAllocation.update({
       where: { id: req.params.id },
-      data,
-      include: { employee: EMP, timeOffType: true },
+      // Editing a draft up to APPROVED is the same decision as pressing Approve.
+      data: { ...data, ...approvalStamp(data.status, req) },
+      include: { employee: EMP, timeOffType: true, approvedBy: APPROVER },
     });
     res.json(allocShape(row));
   }),
@@ -190,7 +204,10 @@ router.get(
   asyncHandler(async (req, res) => {
     const row = await prisma.leaveAllocation.findUnique({
       where: { id: req.params.id },
-      include: { employee: EMP, timeOffType: true, requests: { include: { timeOffType: true } } },
+      include: {
+        employee: EMP, timeOffType: true, approvedBy: APPROVER,
+        requests: { include: { timeOffType: true } },
+      },
     });
     if (!row) throw notFound('Allocation not found');
     if (!isHr(req.user.role)) {
@@ -251,10 +268,14 @@ router.post(
   '/allocations/:id/approve',
   requireMinRole('HR_MANAGER'),
   asyncHandler(async (req, res) => {
+    const existing = await prisma.leaveAllocation.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw notFound('Allocation not found');
+    await assertNotSelf(existing, req);
+
     const row = await prisma.leaveAllocation.update({
       where: { id: req.params.id },
-      data: { status: 'APPROVED' },
-      include: { employee: EMP, timeOffType: true },
+      data: { status: 'APPROVED', approvedById: req.user.id, approvedAt: new Date() },
+      include: { employee: EMP, timeOffType: true, approvedBy: APPROVER },
     });
     res.json(allocShape(row));
   }),
@@ -301,14 +322,26 @@ router.get(
   '/requests',
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
-    const { employeeId, timeOffTypeId, status } = req.query;
+    const { employeeId, timeOffTypeId, status, scope } = req.query;
     const { year, month } = periodFilterSchema.parse(req.query);
     // A request is filed against the day it starts, so a leave spanning a month
     // boundary belongs to the month it began in.
     const window = periodWindow(year, month);
 
+    // "My Team" scopes the list to the requester's own direct reports. A user
+    // with no employee record manages nobody, so it must match nothing rather
+    // than falling through to everyone.
+    let teamFilter;
+    if (scope === 'team') {
+      const me = await prisma.employee.findFirst({
+        where: { userId: req.user.id }, select: { id: true },
+      });
+      teamFilter = { managerId: me?.id ?? '__none__' };
+    }
+
     const where = {
       ...(isHr(req.user.role) ? {} : { employee: { userId: req.user.id } }),
+      ...(teamFilter ? { employee: teamFilter } : {}),
       ...(employeeId ? { employeeId } : {}),
       ...(timeOffTypeId ? { timeOffTypeId } : {}),
       ...(status ? { status } : {}),
@@ -409,14 +442,76 @@ router.post(
   }),
 );
 
+// Nobody signs off their own leave. This mirrors the rule already enforced on
+// user roles: an approval is a control, and a control you can apply to yourself
+// is not one. Applies to admins too - the answer there is a second approver,
+// not an exemption.
+async function assertNotSelf(record, req, tx = prisma) {
+  const employee = await tx.employee.findUnique({
+    where: { id: record.employeeId },
+    select: { userId: true },
+  });
+  if (employee?.userId && employee.userId === req.user.id) {
+    throw badRequest(
+      'You cannot approve or refuse your own time off request. Ask another approver.',
+    );
+  }
+}
+
+// Enforces the type's approvalMode, which was previously stored but never read -
+// MANAGER and OFFICER behaved identically because both endpoints were gated on
+// the HR_MANAGER role alone, so an employee's actual line manager got a 403.
+//
+//   OFFICER - an HR time off officer (HR_MANAGER and above) only.
+//   MANAGER - the employee's own line manager, with officers still able to act
+//             so a manager on leave, or an employee with no manager set, cannot
+//             deadlock the queue.
+//   NONE    - never reaches here; those requests are approved on submission.
+//
+// The modes are two kinds of approver, not two roles: MANAGER is a per-employee
+// relationship, OFFICER is a role. The payroll roles are deliberately not
+// options - they govern pay, not leave.
+async function assertCanDecide(request, req, tx = prisma) {
+  await assertNotSelf(request, req, tx);
+  if (isHr(req.user.role)) return;
+
+  const type = await tx.timeOffType.findUnique({
+    where: { id: request.timeOffTypeId },
+    select: { approvalMode: true, name: true },
+  });
+
+  if (type?.approvalMode === 'MANAGER') {
+    const [employee, me] = await Promise.all([
+      tx.employee.findUnique({ where: { id: request.employeeId }, select: { managerId: true } }),
+      tx.employee.findFirst({ where: { userId: req.user.id }, select: { id: true } }),
+    ]);
+    if (me && employee?.managerId && employee.managerId === me.id) return;
+    throw forbidden(`${type.name} is approved by the employee's manager or an HR officer`);
+  }
+
+  // OFFICER mode: the employee's own HR responsible is the named officer for
+  // this case, so they can decide even without a blanket HR role.
+  const [employee, me] = await Promise.all([
+    tx.employee.findUnique({ where: { id: request.employeeId }, select: { hrResponsibleId: true } }),
+    tx.employee.findFirst({ where: { userId: req.user.id }, select: { id: true } }),
+  ]);
+  if (me && employee?.hrResponsibleId && employee.hrResponsibleId === me.id) return;
+
+  throw forbidden(
+    `${type?.name ?? 'This leave type'} is approved by an HR officer or the employee's HR responsible`,
+  );
+}
+
 router.post(
   '/requests/:id/approve',
-  requireMinRole('HR_MANAGER'),
+  // Authorisation is per-request here, not per-role: see assertCanDecide.
+  attachEmployee,
   asyncHandler(async (req, res) => {
     const row = await prisma.$transaction(async (tx) => {
       const request = await tx.leaveRequest.findUnique({ where: { id: req.params.id } });
       if (!request) throw notFound('Request not found');
       if (request.status === 'APPROVED') throw badRequest('Request is already approved');
+      await assertCanDecide(request, req, tx);
 
       const allocationId = await consumeAllocation(request, tx);
 
@@ -437,9 +532,14 @@ router.post(
 
 router.post(
   '/requests/:id/refuse',
-  requireMinRole('HR_MANAGER'),
+  attachEmployee,
   asyncHandler(async (req, res) => {
     const { refusalReason } = z.object({ refusalReason: z.string().nullish() }).parse(req.body ?? {});
+
+    const existing = await prisma.leaveRequest.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw notFound('Request not found');
+    await assertCanDecide(existing, req);
+
     const row = await prisma.leaveRequest.update({
       where: { id: req.params.id },
       data: {

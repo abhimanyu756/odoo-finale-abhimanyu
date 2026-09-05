@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Calculator, CheckCircle2, XCircle, Search } from 'lucide-react';
+import {
+  Plus, Calculator, CheckCircle2, XCircle, Search, HelpCircle, ChevronDown,
+} from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -45,6 +47,7 @@ export default function SalaryRules() {
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
           <input className="o-input pl-8" placeholder="Search salary rules…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
         <SearchSelect
@@ -55,7 +58,8 @@ export default function SalaryRules() {
           options={[{ value: '', label: 'All structures' },
             ...(structures?.rows ?? []).map((s) => ({ value: s.id, label: s.name, hint: s.code }))]}
         />
-        <select className="o-input w-auto" onChange={(e) => list.setParam({ category: e.target.value || undefined })}>
+        <select className="o-input w-auto" value={list.params.category ?? ''}
+          onChange={(e) => list.setParam({ category: e.target.value || undefined })}>
           <option value="">All categories</option>
           {(meta?.categories ?? []).map((c) => <option key={c} value={c}>{titleCase(c)}</option>)}
         </select>
@@ -130,6 +134,8 @@ function RuleModal({ rule, structures, meta, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [check, setCheck] = useState(null);
+  const [condCheck, setCondCheck] = useState(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   // Validate the expression against the server's sample context as it is typed,
@@ -149,6 +155,26 @@ function RuleModal({ rule, structures, meta, onClose, onSaved }) {
     }, 400);
     return () => clearTimeout(t);
   }, [form.expression, form.computeType]);
+
+  // A broken condition silently skips the rule at payrun time, so it gets the
+  // same live check the expression does.
+  useEffect(() => {
+    if (!form.condition.trim()) {
+      setCondCheck(null);
+      return undefined;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.post('/salary/rules/validate', {
+          expression: form.condition, kind: 'condition',
+        });
+        setCondCheck(data);
+      } catch (err) {
+        setCondCheck({ valid: false, error: errorMessage(err) });
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [form.condition]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -282,21 +308,50 @@ function RuleModal({ rule, structures, meta, onClose, onSaved }) {
                   </span>
                 </div>
               )}
-              {meta && (
-                <p className="mt-2 text-[11px] leading-relaxed text-ink-soft">
-                  <strong>Variables:</strong> {meta.variables.join(', ')}<br />
-                  <strong>Categories:</strong> {meta.categoryRefs.join(', ')}<br />
-                  <strong>Functions:</strong> {meta.functions.join(', ')}
-                </p>
-              )}
+              <ExpressionHelp
+                meta={meta}
+                open={helpOpen}
+                onToggle={() => setHelpOpen((v) => !v)}
+                examples={meta?.examples}
+                onInsert={(code) => setForm((f) => ({ ...f, expression: code }))}
+              />
             </div>
           )}
         </div>
 
         <div className="sm:col-span-2">
-          <Field label="Condition" hint="Optional — the rule only applies when this evaluates true, e.g. worked_days > 20">
-            <input className="o-input font-mono text-xs" value={form.condition} onChange={set('condition')} />
+          <Field label="Condition"
+            hint="Optional. Leave empty and the rule always applies. Otherwise the rule is skipped entirely whenever this is false.">
+            <input className="o-input font-mono text-xs" value={form.condition} onChange={set('condition')}
+              placeholder="worked_days >= 20" />
           </Field>
+
+          {condCheck && (
+            <div className={`mt-2 flex items-start gap-2 rounded border px-2.5 py-1.5 text-xs ${
+              !condCheck.valid ? 'border-red-200 bg-red-50 text-red-700'
+                : condCheck.passes ? 'border-green-200 bg-green-50 text-green-800'
+                : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+              {condCheck.valid ? <CheckCircle2 size={14} className="mt-0.5" /> : <XCircle size={14} className="mt-0.5" />}
+              <span>
+                {!condCheck.valid ? condCheck.error
+                  : condCheck.passes
+                    ? 'Valid — true for the sample employee, so the rule would apply'
+                    : 'Valid — false for the sample employee, so the rule would be skipped'}
+              </span>
+            </div>
+          )}
+
+          {meta?.conditionExamples && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {meta.conditionExamples.map((ex) => (
+                <button key={ex.code} type="button" title={ex.code}
+                  onClick={() => setForm((f) => ({ ...f, condition: ex.code }))}
+                  className="rounded border border-hairline bg-white px-2 py-0.5 text-[11px] text-ink-soft hover:bg-odoo-50 hover:text-odoo-700">
+                  {ex.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
@@ -310,5 +365,82 @@ function RuleModal({ rule, structures, meta, onClose, onSaved }) {
         )}
       </form>
     </Modal>
+  );
+}
+
+// The reference an author needs while writing a formula: what each variable
+// means, what it will hold, and a set of working starting points. Collapsed by
+// default so it does not crowd the form once you know the vocabulary.
+function ExpressionHelp({ meta, open, onToggle, examples, onInsert }) {
+  if (!meta) return null;
+
+  return (
+    <div className="mt-3 rounded-md border border-hairline bg-gray-50">
+      <button type="button" onClick={onToggle}
+        className="flex w-full items-center justify-between px-2.5 py-1.5 text-xs font-medium text-ink">
+        <span className="flex items-center gap-1.5">
+          <HelpCircle size={13} className="text-odoo-500" />
+          What can I write here?
+        </span>
+        <ChevronDown size={14} className={`text-ink-soft transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="border-t border-hairline px-2.5 py-2 text-[11px]">
+          <p className="mb-2 text-ink-soft">
+            An expression is plain arithmetic over the values below. It must produce a
+            number. Write the amount only — no <code className="font-mono">result =</code> needed,
+            though it is accepted.
+          </p>
+
+          <p className="mb-1 font-semibold text-ink">Start from an example</p>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {(examples ?? []).map((ex) => (
+              <button key={ex.code} type="button" title={ex.code} onClick={() => onInsert(ex.code)}
+                className="rounded border border-hairline bg-white px-2 py-0.5 text-ink-soft hover:bg-odoo-50 hover:text-odoo-700">
+                {ex.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="mb-1 font-semibold text-ink">
+            Values you can use
+            <span className="ml-1 font-normal text-ink-soft">
+              (sample column shows what the live check tests against)
+            </span>
+          </p>
+          <div className="mb-3 max-h-52 overflow-y-auto rounded border border-hairline bg-white">
+            <table className="w-full">
+              <tbody>
+                {(meta.reference ?? []).map((v) => (
+                  <tr key={v.name} className="border-b border-gray-100 last:border-0">
+                    <td className="whitespace-nowrap px-2 py-1 font-mono text-odoo-700">{v.name}</td>
+                    <td className="px-2 py-1 text-ink-soft">{v.about}</td>
+                    <td className="whitespace-nowrap px-2 py-1 text-right tabular-nums text-ink">
+                      {v.sample ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="mb-1 font-semibold text-ink">Functions</p>
+          <ul className="mb-3 grid gap-0.5 sm:grid-cols-2">
+            {(meta.functionHelp ?? []).map((f) => (
+              <li key={f.name} className="text-ink-soft">
+                <code className="font-mono text-odoo-700">{f.name}</code> — {f.about}
+              </li>
+            ))}
+          </ul>
+
+          <p className="text-ink-soft">
+            <strong className="text-ink">Order matters.</strong> A rule can only read
+            totals that earlier rules produced, so <code className="font-mono">categories.GROSS</code> is
+            only meaningful in a rule whose sequence is higher than the one that sets it.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

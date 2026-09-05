@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Plus, Search, ShieldCheck, KeyRound, Trash2 } from 'lucide-react';
+import { Plus, Search, ShieldCheck, KeyRound, Trash2, Info } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -21,22 +22,35 @@ export default function Users() {
   return (
     <>
       <PageHeader
-        title="User Management"
-        subtitle="Accounts are created here and linked to an employee record"
+        title="User Access"
+        subtitle="Grant a login to an employee who already exists, and set their role"
         actions={
           <>
             <span className="o-badge bg-odoo-100 text-odoo-700">Admin Only</span>
             <button type="button" className="o-btn-primary" onClick={() => setCreating(true)}>
-              <Plus size={15} /> New User
+              <Plus size={15} /> Grant Login
             </button>
           </>
         }
       />
 
+      {/* Reviewers reach for "Users" expecting to create a person here. Say the
+          order plainly rather than letting the nav label imply the wrong one. */}
+      <div className="mb-3 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-800">
+        <Info size={14} className="mt-0.5 shrink-0" />
+        <span>
+          <strong>The employee record comes first.</strong> Add the person under{' '}
+          <Link to="/employees" className="font-medium underline hover:no-underline">Employees</Link>,
+          then grant them a login here — or straight from their employee form. An employee can
+          exist without a login; a login always belongs to an employee.
+        </span>
+      </div>
+
       <div className="mb-3 flex flex-wrap gap-2">
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
-          <input className="o-input pl-8" placeholder="Search users, employees or email…"
+          <input className="o-input pl-8" placeholder="Search logins, employees or email…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
         <select
@@ -176,7 +190,7 @@ function CreateUserModal({ onClose, onSaved }) {
   };
 
   return (
-    <Modal open title="Create / Edit User" onClose={onClose}
+    <Modal open title="Grant Login to an Employee" onClose={onClose}
       footer={
         <>
           <button type="button" className="o-btn-secondary" onClick={onClose}>Cancel</button>

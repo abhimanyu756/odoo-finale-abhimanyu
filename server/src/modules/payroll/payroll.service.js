@@ -79,6 +79,11 @@ export async function collectWarnings(payrun, tx = prisma) {
   if (!payslips.length) warnings.push(warn('NO_PAYSLIPS', 'This payrun has no payslips', 'ERROR'));
 
   for (const slip of payslips) {
+    // A cancelled payslip is void: it pays nothing and duplicates nothing, so
+    // it raises no warnings. Cancelling is how an overlap gets resolved once a
+    // run can no longer be edited, and that only works if the warning clears.
+    if (slip.status === 'CANCELLED') continue;
+
     const who = `${slip.employee.firstName} ${slip.employee.lastName}`;
 
     if (!slip.employee.bankAccount) {

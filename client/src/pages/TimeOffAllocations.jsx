@@ -45,9 +45,11 @@ export default function TimeOffAllocations() {
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
           <input className="o-input pl-8" placeholder="Search by employee or type…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
         <select className="o-input w-auto"
+          value={list.params.status ?? ''}
           onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
           {['DRAFT', 'APPROVED', 'REFUSED'].map((s) => <option key={s} value={s}>{s[0] + s.slice(1).toLowerCase()}</option>)}
@@ -223,8 +225,10 @@ function AllocationModal({ types, onClose, onSaved }) {
             <option value="APPROVED">Approved</option>
           </select>
         </Field>
-        <Field label="Notes">
-          <input className="o-input" value={form.notes} onChange={set('notes')} />
+        <Field label="Description"
+          hint="Why this balance is being granted — shown on the allocation form">
+          <textarea className="o-input" rows={3} value={form.notes} onChange={set('notes')}
+            placeholder="Annual leave balance granted at start of policy year" />
         </Field>
         {error && <p className="rounded border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{error}</p>}
       </form>
@@ -297,7 +301,19 @@ function AllocationDetail({ allocation, onClose, onChanged }) {
             <DetailRow label="Valid From">{date(a.validFrom)}</DetailRow>
             <DetailRow label="Valid To">{a.validTo ? date(a.validTo) : 'Open-ended'}</DetailRow>
             <DetailRow label="Status"><StatusBadge value={a.status} /></DetailRow>
-            {a.notes && <DetailRow label="Notes">{a.notes}</DetailRow>}
+            <DetailRow label="Approver">
+              {a.approvedBy?.name
+                ? (
+                  <span>
+                    {a.approvedBy.name}
+                    {a.approvedAt && (
+                      <span className="ml-1.5 text-xs text-ink-soft">on {date(a.approvedAt)}</span>
+                    )}
+                  </span>
+                )
+                : <span className="text-ink-soft">Not approved yet</span>}
+            </DetailRow>
+            {a.notes && <DetailRow label="Description">{a.notes}</DetailRow>}
 
             {data?.balance && (
               <div className="mt-3 grid grid-cols-3 gap-2">

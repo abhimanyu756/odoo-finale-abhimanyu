@@ -33,9 +33,17 @@ router.get(
   asyncHandler(async (_req, res) => {
     const rows = await prisma.department.findMany({
       orderBy: { name: 'asc' },
-      include: { _count: { select: { employees: true } } },
+      include: {
+        company: { select: { id: true, name: true } },
+        _count: { select: { employees: true, contracts: true } },
+      },
     });
-    res.json(rows.map((d) => ({ ...d, employeeCount: d._count.employees, _count: undefined })));
+    res.json(rows.map((d) => ({
+      ...d,
+      employeeCount: d._count.employees,
+      contractCount: d._count.contracts,
+      _count: undefined,
+    })));
   }),
 );
 

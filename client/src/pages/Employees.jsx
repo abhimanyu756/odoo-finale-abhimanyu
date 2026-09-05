@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LayoutGrid, List as ListIcon, Plus, Search, Users } from 'lucide-react';
+import { LayoutGrid, List as ListIcon, Plus, Search, Users, Users2 } from 'lucide-react';
 import { useList } from '../hooks/useApi';
 import { useFetch } from '../hooks/useApi';
 import { useAuth } from '../context/AuthContext';
@@ -83,9 +83,25 @@ export default function Employees() {
           <input
             className="o-input pl-8"
             placeholder="Search employees…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })}
           />
         </div>
+        {/* "My Team" from the mockup: the requester's own direct reports.
+            Available to everyone, since a line manager is usually a plain
+            employee - that is precisely who needs it. */}
+        <button
+          type="button"
+          onClick={() => list.setParam({ scope: list.params.scope === 'team' ? undefined : 'team' })}
+          className={`o-badge border px-2.5 py-1.5 text-xs transition-colors ${
+            list.params.scope === 'team'
+              ? 'border-odoo-300 bg-odoo-50 text-odoo-700'
+              : 'border-hairline bg-white text-ink-soft hover:bg-odoo-50'}`}
+          title="Show only employees who report to me"
+        >
+          <Users2 size={13} />
+          My Team
+        </button>
         <SearchSelect
           className="w-auto min-w-44"
           value={list.params.departmentId ?? ''}
@@ -142,6 +158,7 @@ export default function Employees() {
                   <th>Department</th>
                   <th>Job Position</th>
                   <th>Manager</th>
+                  <th>HR Responsible</th>
                   <th>Type</th>
                   <th>Status</th>
                 </tr>
@@ -158,6 +175,7 @@ export default function Employees() {
                     <td>{e.department?.name ?? '—'}</td>
                     <td>{e.jobPosition?.name ?? '—'}</td>
                     <td>{e.manager?.name ?? '—'}</td>
+                    <td className="text-ink-soft">{e.hrResponsible?.name ?? '—'}</td>
                     <td>{titleCase(e.employeeType)}</td>
                     <td><StatusBadge value={e.status} /></td>
                   </tr>

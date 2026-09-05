@@ -14,6 +14,10 @@ import { PageHeader, Spinner, ErrorState, StatusBadge, SmartButton, Field, Modal
 
 const TABS = ['Work Information', 'Private Information'];
 
+// Only these roles can be a named HR responsible; the payroll-only roles
+// govern pay rather than the employment relationship.
+const HR_ROLES = ['HR_MANAGER', 'HR_PAYROLL_ADMIN', 'ADMIN'];
+
 // Declared at module scope: a component created inside render is a new type on
 // every pass, so React remounts it and any focused input loses focus.
 const ReadRow = ({ label, children }) => (
@@ -55,6 +59,7 @@ export default function EmployeeForm() {
     setForm({
       firstName: employee.firstName, lastName: employee.lastName,
       workEmail: employee.workEmail, personalEmail: employee.personalEmail ?? '',
+      hrResponsibleId: employee.hrResponsible?.id ?? '',
       phone: employee.phone ?? '', employeeType: employee.employeeType,
       status: employee.status, workLocation: employee.workLocation ?? '',
       departmentId: employee.department?.id ?? '', jobPositionId: employee.jobPosition?.id ?? '',
@@ -241,6 +246,19 @@ export default function EmployeeForm() {
                         .map((m) => ({ value: m.id, label: m.name, hint: m.workEmail }))]}
                   />
                 </Field>
+                <Field label="HR Responsible"
+                  hint="The HR person who owns this file — approves officer-level leave">
+                  <SearchSelect
+                    value={form.hrResponsibleId}
+                    onChange={(v) => setForm((f) => ({ ...f, hrResponsibleId: v }))}
+                    placeholder="—"
+                    searchPlaceholder="Search by name or email…"
+                    options={[{ value: '', label: '—' },
+                      ...(managers?.rows ?? [])
+                        .filter((m) => m.id !== id && m.user && HR_ROLES.includes(m.user.role))
+                        .map((m) => ({ value: m.id, label: m.name, hint: m.user?.role?.replace(/_/g, ' ') }))]}
+                  />
+                </Field>
                 <Field label="Working Schedule">
                   <SearchSelect
                     value={form.workingScheduleId}
@@ -273,6 +291,7 @@ export default function EmployeeForm() {
                 <ReadRow label="Department">{value(employee.department?.name)}</ReadRow>
                 <ReadRow label="Job Position">{value(employee.jobPosition?.name)}</ReadRow>
                 <ReadRow label="Manager">{value(employee.manager?.name)}</ReadRow>
+                <ReadRow label="HR Responsible">{value(employee.hrResponsible?.name)}</ReadRow>
                 <ReadRow label="Working Schedule">
                   {employee.workingSchedule
                     ? `${employee.workingSchedule.name} (${employee.workingSchedule.hoursPerWeek}h/week)`

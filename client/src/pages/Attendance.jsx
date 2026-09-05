@@ -35,6 +35,7 @@ export default function Attendance() {
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
           <input className="o-input pl-8" placeholder="Search by employee…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
         <button type="button" className="o-btn-secondary"
@@ -51,7 +52,8 @@ export default function Attendance() {
               ...(employees?.rows ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.workEmail }))]}
           />
         )}
-        <select className="o-input w-auto" onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
+        <select className="o-input w-auto" value={list.params.status ?? ''}
+          onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
           {['PRESENT', 'LATE', 'ABSENT', 'MISSING_CHECKOUT'].map((s) => (
             <option key={s} value={s}>{s.replace('_', ' ')}</option>

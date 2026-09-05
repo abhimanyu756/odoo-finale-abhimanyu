@@ -29,6 +29,7 @@ export default function Payruns() {
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
           <input className="o-input pl-8" placeholder="Search payruns…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
         <PeriodFilter
@@ -337,7 +338,8 @@ function PayrunWizard({ onClose, onCreated }) {
             <table className="o-table">
               <thead>
                 <tr>
-                  <th className="w-10" /><th>Employee</th><th>Working Hours</th>
+                  <th className="w-10" /><th>Employee</th><th>Work Email</th>
+                  <th>Job Position</th><th>Working Hours</th>
                   <th>Start Date</th><th>Contract</th><th className="text-right">Wage</th>
                 </tr>
               </thead>
@@ -355,6 +357,10 @@ function PayrunWizard({ onClose, onCreated }) {
                         <span className="ml-1.5 text-xs font-normal text-ink-soft">{c.department.name}</span>
                       )}
                     </td>
+                    {/* The mockup identifies a person by name + work email: two
+                        employees can share a name, an address is unique. */}
+                    <td className="text-ink-soft">{c.workEmail ?? '—'}</td>
+                    <td className="text-ink-soft">{c.jobPosition?.name ?? '—'}</td>
                     <td className="text-ink-soft">
                       {c.workingHours != null ? `${c.workingHours} hours/week` : '—'}
                     </td>

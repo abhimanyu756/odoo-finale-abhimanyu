@@ -26,8 +26,35 @@ const structureShape = (s) => ({
   rules: s.rules?.map(ruleShape),
   ruleCount: s._count?.rules ?? s.rules?.length,
   contractCount: s._count?.contracts,
+  // Set by withEmployeeCounts(); a structure loaded without it says "unknown"
+  // rather than claiming zero.
+  employeeCount: s.employeeCount,
   _count: undefined,
 });
+
+// How many people this structure actually pays right now. Contracts are not a
+// proxy for that: most employees carry an expired contract alongside a running
+// one, so the contract count runs near double the headcount.
+//
+// A running contract is one-per-employee (assertNoOverlap enforces it), so
+// counting running contracts is already a distinct employee count.
+async function withEmployeeCounts(structures) {
+  const ids = structures.map((s) => s.id);
+  if (!ids.length) return structures;
+
+  const grouped = await prisma.contract.groupBy({
+    by: ['salaryStructureId'],
+    where: {
+      salaryStructureId: { in: ids },
+      status: 'RUNNING',
+      employee: { status: 'ACTIVE' },
+    },
+    _count: { _all: true },
+  });
+  const byStructure = new Map(grouped.map((g) => [g.salaryStructureId, g._count._all]));
+
+  return structures.map((s) => ({ ...s, employeeCount: byStructure.get(s.id) ?? 0 }));
+}
 
 // ---------------------------------------------------------- Structures ----
 router.get(
@@ -54,7 +81,7 @@ router.get(
       prisma.salaryStructure.count({ where }),
     ]);
 
-    res.json(listResponse(rows.map(structureShape), total, q));
+    res.json(listResponse((await withEmployeeCounts(rows)).map(structureShape), total, q));
   }),
 );
 
@@ -70,7 +97,8 @@ router.get(
       },
     });
     if (!row) throw notFound('Salary structure not found');
-    res.json(structureShape(row));
+    const [withCount] = await withEmployeeCounts([row]);
+    res.json(structureShape(withCount));
   }),
 );
 
@@ -254,13 +282,58 @@ router.post(
   '/rules/validate',
   canRead,
   asyncHandler(async (req, res) => {
-    const { expression } = z.object({ expression: z.string().min(1) }).parse(req.body);
+    const { expression, kind } = z
+      .object({
+        expression: z.string().min(1),
+        kind: z.enum(['expression', 'condition']).default('expression'),
+      })
+      .parse(req.body);
+
+    const result = validateExpression(expression, SAMPLE_CONTEXT);
     res.json({
-      ...validateExpression(expression, SAMPLE_CONTEXT),
+      ...result,
+      kind,
+      // A condition gates the rule, so what matters is whether the sample data
+      // passes it, not the number it produced.
+      ...(kind === 'condition' && result.valid
+        ? { passes: Boolean(result.sample) }
+        : {}),
       sampleContext: SAMPLE_CONTEXT,
     });
   }),
 );
+
+const VARIABLE_HELP = [
+  { name: 'wage', about: "Monthly wage on the contract that covers this period" },
+  { name: 'worked_days', about: 'Days actually attended (falls back to scheduled days less unpaid leave)' },
+  { name: 'worked_hours', about: 'Hours recorded on attendance for the period' },
+  { name: 'overtime_hours', about: 'Hours beyond the working schedule' },
+  { name: 'scheduled_days', about: 'Days the working schedule expected' },
+  { name: 'scheduled_hours', about: 'Hours the working schedule expected' },
+  { name: 'leave_days', about: 'Approved leave days of every type' },
+  { name: 'unpaid_leave_days', about: 'Approved leave days on unpaid types only' },
+  { name: 'days_in_period', about: 'Calendar days in the payroll period' },
+];
+
+const EXPRESSION_EXAMPLES = [
+  { label: '40% of basic', code: 'categories.BASIC * 0.4' },
+  { label: 'PF capped at 1800', code: 'min(categories.BASIC * 0.12, 1800)' },
+  { label: 'Bonus only if 20+ days worked', code: 'worked_days >= 20 ? wage * 0.05 : 0' },
+  { label: 'Overtime at 1.5x hourly', code: 'overtime_hours * (wage / 176) * 1.5' },
+  { label: 'Prorate on attendance', code: 'roundTo(wage * (worked_days / max(scheduled_days, 1)), 2)' },
+  { label: 'Deduct unpaid leave', code: 'roundTo(wage / days_in_period * unpaid_leave_days, 2)' },
+  { label: 'Gross = basic + allowances', code: 'categories.BASIC + categories.ALLOWANCE' },
+  { label: 'Net = gross - deductions', code: 'categories.GROSS - categories.DEDUCTION' },
+];
+
+const CONDITION_EXAMPLES = [
+  { label: 'Only when a full month was worked', code: 'worked_days >= 20' },
+  { label: 'Only for higher earners', code: 'wage > 100000' },
+  { label: 'Only when overtime exists', code: 'overtime_hours > 0' },
+  { label: 'Two tests at once', code: 'worked_days >= 20 and wage > 50000' },
+  { label: 'Either test', code: 'overtime_hours > 0 or leave_days == 0' },
+  { label: 'Skip when unpaid leave was taken', code: 'not (unpaid_leave_days > 0)' },
+];
 
 router.get(
   '/rules-meta',
@@ -273,6 +346,31 @@ router.get(
       variables: Object.keys(SAMPLE_CONTEXT).filter((k) => typeof SAMPLE_CONTEXT[k] !== 'object'),
       categoryRefs: Object.keys(SAMPLE_CONTEXT.categories).map((c) => `categories.${c}`),
       functions: ['min', 'max', 'round', 'roundTo', 'floor', 'ceil', 'abs'],
+      // Names alone do not tell an author what a variable means or what it will
+      // hold, so the form shows a description and the sample value beside each.
+      reference: [
+        ...VARIABLE_HELP.map((v) => ({ ...v, sample: SAMPLE_CONTEXT[v.name] })),
+        ...Object.entries(SAMPLE_CONTEXT.categories).map(([c, sample]) => ({
+          name: `categories.${c}`,
+          about: `Running total of all ${c.toLowerCase()} rules that have already run`,
+          sample,
+        })),
+        {
+          name: 'rules.CODE',
+          about: "Amount produced by an earlier rule, e.g. rules.HRA. Only rules with a lower sequence are available",
+          sample: null,
+        },
+      ],
+      functionHelp: [
+        { name: 'min(a, b)', about: 'Smaller of two values — caps a deduction' },
+        { name: 'max(a, b)', about: 'Larger of two values — sets a floor' },
+        { name: 'roundTo(v, dp)', about: 'Round to dp decimal places, e.g. roundTo(x, 2)' },
+        { name: 'round(v)', about: 'Round to the nearest whole number' },
+        { name: 'floor(v) / ceil(v)', about: 'Round down / up' },
+        { name: 'abs(v)', about: 'Drop the sign' },
+      ],
+      examples: EXPRESSION_EXAMPLES,
+      conditionExamples: CONDITION_EXAMPLES,
     });
   }),
 );

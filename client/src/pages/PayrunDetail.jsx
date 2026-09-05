@@ -597,6 +597,7 @@ function AddEmployeesModal({ run, busy, onAdd, onClose }) {
                       onChange={() => toggle(e.id)} onClick={(ev) => ev.stopPropagation()} />
                   </td>
                   <td className="font-medium text-ink">{e.name}</td>
+                  <td className="text-ink-soft">{e.workEmail ?? '—'}</td>
                   <td className="text-ink-soft">{e.department?.name ?? '—'}</td>
                   <td className="text-ink-soft">{e.jobPosition?.name ?? '—'}</td>
                   <td className="text-right tabular-nums">

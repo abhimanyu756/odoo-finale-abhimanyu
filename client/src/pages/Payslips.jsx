@@ -24,6 +24,7 @@ export default function Payslips() {
         <div className="relative flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
           <input className="o-input pl-8" placeholder="Search payslip number…"
+            value={list.params.search ?? ''}
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
         {isPayroll(role) && (
@@ -36,7 +37,8 @@ export default function Payslips() {
               ...(employees?.rows ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.workEmail }))]}
           />
         )}
-        <select className="o-input w-auto" onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
+        <select className="o-input w-auto" value={list.params.status ?? ''}
+          onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
           {['DRAFT', 'COMPUTED', 'VALIDATED', 'PAID'].map((s) => (
             <option key={s} value={s}>{s[0] + s.slice(1).toLowerCase()}</option>

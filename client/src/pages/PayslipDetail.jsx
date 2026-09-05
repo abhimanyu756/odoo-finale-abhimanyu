@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Printer, Calculator, BadgeCheck, CheckCircle2, AlertTriangle, ArrowRight,
+  ArrowLeft, Printer, Calculator, BadgeCheck, CheckCircle2, AlertTriangle, ArrowRight, Ban,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useFetch } from '../hooks/useApi';
@@ -102,6 +102,26 @@ export default function PayslipDetail() {
                   disabled={busy || slip?.status !== 'VALIDATED'}
                   onClick={() => act('mark-paid', 'Payment')}>
                   <BadgeCheck size={14} /> Mark Paid
+                </button>
+                {/* Void without erasing: the way to retract a payslip once the
+                    run is past the point where rows can be removed. */}
+                <button
+                  type="button"
+                  className="o-btn-danger"
+                  disabled={busy || slip?.status === 'CANCELLED' || slip?.status === 'DRAFT'}
+                  title={slip?.status === 'DRAFT'
+                    ? 'A draft payslip can be removed from the payrun instead'
+                    : 'Void this payslip — it stops counting toward the payrun'}
+                  onClick={() => {
+                    if (!confirm(
+                      `Cancel ${slip.employee?.name}'s payslip ${slip.number}?\n\n`
+                      + 'It stays on record for audit but stops counting toward the payrun '
+                      + 'totals and no longer raises a duplicate warning.',
+                    )) return;
+                    act('cancel', 'Cancellation');
+                  }}
+                >
+                  <Ban size={14} /> {busy === 'cancel' ? 'Cancelling…' : 'Cancel Payslip'}
                 </button>
               </>
             )}
