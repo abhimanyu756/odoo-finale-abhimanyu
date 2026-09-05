@@ -177,6 +177,21 @@ authenticating against a person who no longer exists.
 sets the employee `INACTIVE`, deactivates the login and revokes its sessions.
 `POST /employees/:id/restore` undoes it.
 
+### User management
+
+Admin-only. Accounts are separate from employee records but linked to one, so the
+screen lists **Users** and shows the employee behind each. Roles can be reassigned,
+accounts activated or deactivated, passwords reset, and logins revoked without
+touching the employee record.
+
+Three guards prevent an administrator locking themselves out — the app has no
+recovery path if they do:
+
+- You cannot change your own role, deactivate yourself, or delete your own account.
+- The **last active administrator** cannot be demoted, deactivated or deleted.
+- Changing a role, deactivating an account or resetting a password **revokes every
+  refresh token** for that user, so the old access level cannot outlive the change.
+
 ### Payrun workflow
 
 Two-step wizard — step 1 collects scope and previews eligibility, and **nothing is
@@ -196,6 +211,8 @@ POST   /api/auth/forgot-password | reset-password
 GET    /api/org/companies | departments | job-positions
 CRUD   /api/employees                POST /api/employees/:id/user   (admin)
 GET    /api/employees/:id/deletion-impact   POST /api/employees/:id/archive | restore
+CRUD   /api/users  (admin)           GET /api/users/assignable-employees | roles
+POST   /api/users/:id/reset-password
 CRUD   /api/contracts
 CRUD   /api/working-schedules
 CRUD   /api/attendance               GET/POST /api/attendance/me/status|check-in|check-out

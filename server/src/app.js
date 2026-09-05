@@ -14,6 +14,7 @@ import timeOffRoutes from './modules/timeoff/timeoff.routes.js';
 import salaryRoutes from './modules/salary/salary.routes.js';
 import payrollRoutes from './modules/payroll/payroll.routes.js';
 import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
+import userRoutes from './modules/users/users.routes.js';
 
 export function createApp() {
   const app = express();
@@ -37,6 +38,7 @@ export function createApp() {
   app.use('/api/salary', salaryRoutes);
   app.use('/api/payroll', payrollRoutes);
   app.use('/api/dashboard', dashboardRoutes);
+  app.use('/api/users', userRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
