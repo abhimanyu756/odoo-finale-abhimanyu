@@ -1,5 +1,20 @@
 import { z } from 'zod';
 
+// zod's .partial() keeps each field's .default(), so a PATCH that omits a
+// defaulted key silently rewrites it (a wage-only edit would reset a contract's
+// status to DRAFT). Patch schemas must strip defaults, not just add optional().
+export const toPatchSchema = (objectSchema) =>
+  z.object(
+    Object.fromEntries(
+      Object.entries(objectSchema.shape).map(([key, field]) => [
+        key,
+        typeof field.removeDefault === 'function'
+          ? field.removeDefault().optional()
+          : field.optional(),
+      ]),
+    ),
+  );
+
 // Shared list-query contract: every list endpoint accepts the same paging,
 // search and sort params so the client table component can be generic.
 export const listQuerySchema = z.object({

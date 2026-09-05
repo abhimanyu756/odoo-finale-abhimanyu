@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler } from '../../lib/errors.js';
+import { toPatchSchema } from '../../lib/http.js';
 import { authenticate, requireMinRole } from '../../middleware/auth.js';
 
 const router = Router();
@@ -55,7 +56,7 @@ router.patch(
   '/departments/:id',
   hrOnly,
   asyncHandler(async (req, res) => {
-    const data = departmentSchema.partial().parse(req.body);
+    const data = toPatchSchema(departmentSchema).parse(req.body);
     res.json(await prisma.department.update({ where: { id: req.params.id }, data }));
   }),
 );

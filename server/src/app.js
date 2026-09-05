@@ -11,6 +11,8 @@ import scheduleRoutes from './modules/schedules/schedules.routes.js';
 import contractRoutes from './modules/contracts/contracts.routes.js';
 import attendanceRoutes from './modules/attendance/attendance.routes.js';
 import timeOffRoutes from './modules/timeoff/timeoff.routes.js';
+import salaryRoutes from './modules/salary/salary.routes.js';
+import payrollRoutes from './modules/payroll/payroll.routes.js';
 
 export function createApp() {
   const app = express();
@@ -31,6 +33,8 @@ export function createApp() {
   app.use('/api/contracts', contractRoutes);
   app.use('/api/attendance', attendanceRoutes);
   app.use('/api/time-off', timeOffRoutes);
+  app.use('/api/salary', salaryRoutes);
+  app.use('/api/payroll', payrollRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

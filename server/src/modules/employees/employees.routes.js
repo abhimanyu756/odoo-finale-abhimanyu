@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { authenticate, requireMinRole, isHr } from '../../middleware/auth.js';
-import { listQuerySchema, paginate, listResponse } from '../../lib/http.js';
+import { listQuerySchema, paginate, listResponse, toPatchSchema } from '../../lib/http.js';
 
 const router = Router();
 router.use(authenticate);
@@ -133,7 +133,7 @@ router.patch(
   '/:id',
   requireMinRole('HR_MANAGER'),
   asyncHandler(async (req, res) => {
-    const data = employeeSchema.partial().parse(req.body);
+    const data = toPatchSchema(employeeSchema).parse(req.body);
     if (data.managerId && data.managerId === req.params.id) {
       throw badRequest('An employee cannot be their own manager');
     }

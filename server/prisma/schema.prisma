@@ -393,6 +393,8 @@ model SalaryRule {
   // FORMULA -> `expression` evaluated by the sandboxed expression parser.
   amount     Decimal? @db.Decimal(12, 2)
   percentage Decimal? @db.Decimal(6, 3)
+  // Multiplier applied to the computed result (e.g. 2 x meal allowance).
+  quantity   Decimal  @default(1) @db.Decimal(8, 2)
   baseExpr   String?
   expression String?
   // Optional guard: rule only applies when this evaluates truthy.

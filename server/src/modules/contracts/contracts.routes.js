@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, notFound } from '../../lib/errors.js';
 import { authenticate, requireMinRole, isHr } from '../../middleware/auth.js';
-import { listQuerySchema, paginate, listResponse, num } from '../../lib/http.js';
+import { listQuerySchema, paginate, listResponse, num, toPatchSchema } from '../../lib/http.js';
 import { nextReference, assertNoOverlap } from './contracts.service.js';
 
 const router = Router();
@@ -96,7 +96,7 @@ const contractSchema = contractBase.refine(endAfterStart, {
 
 // Refinements block .partial(), so patches validate against the bare object
 // and re-check the cross-field rule against the merged record.
-const contractPatchSchema = contractBase.partial();
+const contractPatchSchema = toPatchSchema(contractBase);
 
 router.post(
   '/',

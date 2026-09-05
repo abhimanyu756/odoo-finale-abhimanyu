@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { authenticate, requireMinRole, attachEmployee, isHr } from '../../middleware/auth.js';
-import { listQuerySchema, paginate, listResponse, num } from '../../lib/http.js';
+import { listQuerySchema, paginate, listResponse, num, toPatchSchema } from '../../lib/http.js';
 import { startOfDay, endOfDay, hoursBetween } from '../../lib/dates.js';
 import {
   deriveMetrics,
@@ -181,7 +181,7 @@ const attendanceSchema = attendanceBase.refine(
 );
 
 // Refinements block .partial(); the merged record is re-checked in the handler.
-const attendancePatchSchema = attendanceBase.partial();
+const attendancePatchSchema = toPatchSchema(attendanceBase);
 
 // Hours are always recomputed server-side; a client cannot post worked hours
 // that disagree with the timestamps.

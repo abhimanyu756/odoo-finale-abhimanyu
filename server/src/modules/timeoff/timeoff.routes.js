@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { authenticate, requireMinRole, attachEmployee, isHr } from '../../middleware/auth.js';
-import { listQuerySchema, paginate, listResponse, num } from '../../lib/http.js';
+import { listQuerySchema, paginate, listResponse, num, toPatchSchema } from '../../lib/http.js';
 import {
   computeDuration,
   balanceFor,
@@ -48,7 +48,7 @@ router.patch(
   '/types/:id',
   requireMinRole('HR_MANAGER'),
   asyncHandler(async (req, res) => {
-    const data = typeSchema.partial().parse(req.body);
+    const data = toPatchSchema(typeSchema).parse(req.body);
     res.json(await prisma.timeOffType.update({ where: { id: req.params.id }, data }));
   }),
 );
@@ -133,7 +133,7 @@ router.patch(
   '/allocations/:id',
   requireMinRole('HR_MANAGER'),
   asyncHandler(async (req, res) => {
-    const data = allocationSchema.partial().parse(req.body);
+    const data = toPatchSchema(allocationSchema).parse(req.body);
     const row = await prisma.leaveAllocation.update({
       where: { id: req.params.id },
       data,
