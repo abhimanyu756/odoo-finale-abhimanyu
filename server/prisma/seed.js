@@ -26,7 +26,7 @@ await prisma.department.deleteMany();
 await prisma.company.deleteMany();
 
 console.log('Company, departments, positions...');
-const company = await prisma.company.create({ data: { name: 'OxP Pvt Ltd', currency: 'INR' } });
+const company = await prisma.company.create({ data: { name: 'Odoo', currency: 'INR' } });
 
 const deptNames = ['Finance', 'Engineering', 'Sales', 'Human Resources', 'Operations'];
 const depts = {};
@@ -97,10 +97,18 @@ for (const r of rules) {
 console.log('Time off types...');
 const types = {};
 for (const t of [
-  { name: 'Paid Time Off', code: 'PTO', unit: 'DAYS', requiresAllocation: true, isPaid: true, color: '#714B67' },
-  { name: 'Sick Leave', code: 'SICK', unit: 'DAYS', requiresAllocation: true, isPaid: true, color: '#017E84' },
-  { name: 'Unpaid Leave', code: 'UNPAID', unit: 'DAYS', requiresAllocation: false, isPaid: false, color: '#B4506B' },
-  { name: 'Compensatory Off', code: 'COMP', unit: 'DAYS', requiresAllocation: true, isPaid: true, color: '#8F7A4E' },
+  { name: 'Paid Time Off', code: 'PTO', unit: 'DAYS', requiresAllocation: true, isPaid: true,
+    approvalMode: 'MANAGER', workEntry: 'PAID_LEAVE', color: '#714B67',
+    description: 'Standard annual leave. Balance comes from approved allocations.' },
+  { name: 'Sick Leave', code: 'SICK', unit: 'DAYS', requiresAllocation: true, isPaid: true,
+    approvalMode: 'MANAGER', workEntry: 'SICK_LEAVE', color: '#017E84',
+    description: 'Paid sick leave. Manager approval required.' },
+  { name: 'Unpaid Leave', code: 'UNPAID', unit: 'DAYS', requiresAllocation: false, isPaid: false,
+    approvalMode: 'OFFICER', workEntry: 'UNPAID_LEAVE', color: '#B4506B',
+    description: 'Leave without pay. Drives the payroll deduction rule.' },
+  { name: 'Compensatory Off', code: 'COMP', unit: 'DAYS', requiresAllocation: true, isPaid: true,
+    approvalMode: 'OFFICER', workEntry: 'COMPENSATORY_LEAVE', color: '#8F7A4E',
+    description: 'Time off earned against overtime worked.' },
 ]) {
   types[t.code] = await prisma.timeOffType.create({ data: t });
 }
@@ -123,7 +131,7 @@ const people = [
 
 const employees = [];
 for (const [first, last, dept, pos, role, wage, sched, type, loc] of people) {
-  const email = `${first.toLowerCase()}@oxp.com`;
+  const email = `${first.toLowerCase()}@odoo.com`;
   const user = await prisma.user.create({
     data: { email, passwordHash: await bcrypt.hash('Pass@1234', 10), role },
   });
@@ -151,11 +159,11 @@ for (const [first, last, dept, pos, role, wage, sched, type, loc] of people) {
 
 // Admin account, not an employee-facing role.
 const adminUser = await prisma.user.create({
-  data: { email: 'admin@oxp.com', passwordHash: await bcrypt.hash('Admin@123', 10), role: 'ADMIN' },
+  data: { email: 'admin@odoo.com', passwordHash: await bcrypt.hash('Admin@123', 10), role: 'ADMIN' },
 });
 await prisma.employee.create({
   data: {
-    firstName: 'System', lastName: 'Admin', workEmail: 'admin@oxp.com',
+    firstName: 'System', lastName: 'Admin', workEmail: 'admin@odoo.com',
     companyId: company.id, departmentId: depts['Human Resources'].id,
     userId: adminUser.id, bankAccount: 'HDFC0009999999',
   },
@@ -288,7 +296,10 @@ for (const [first, code, from, to, status] of leavePlan) {
       dateFrom: new Date(from), dateTo: new Date(to), duration: days, status,
       reason: status === 'REFUSED' ? 'Insufficient notice' : 'Personal',
       allocationId: status === 'APPROVED' ? allocation?.id ?? null : null,
-      ...(status === 'APPROVED' ? { approvedById: sara.userId, approvedAt: new Date(from) } : {}),
+      // A refusal is an approval decision too: record who made it and when.
+      ...(['APPROVED', 'REFUSED'].includes(status)
+        ? { approvedById: sara.userId, approvedAt: new Date(from) }
+        : {}),
       ...(status === 'REFUSED' ? { refusalReason: 'Insufficient notice given' } : {}),
     },
   });
@@ -378,10 +389,10 @@ const counts = {
 };
 console.log('\nSeed complete:', counts);
 console.log('\nLogins (all non-admin passwords: Pass@1234)');
-console.log('  admin@oxp.com  / Admin@123    ADMIN');
-console.log('  aarav@oxp.com  / Pass@1234    HR_PAYROLL_ADMIN');
-console.log('  nisha@oxp.com  / Pass@1234    HR_PAYROLL_USER');
-console.log('  sara@oxp.com   / Pass@1234    HR_MANAGER');
-console.log('  rohan@oxp.com  / Pass@1234    EMPLOYEE');
+console.log('  admin@odoo.com / Admin@123    ADMIN');
+console.log('  aarav@odoo.com / Pass@1234    HR_PAYROLL_ADMIN');
+console.log('  nisha@odoo.com / Pass@1234    HR_PAYROLL_USER');
+console.log('  sara@odoo.com  / Pass@1234    HR_MANAGER');
+console.log('  rohan@odoo.com / Pass@1234    EMPLOYEE');
 
 await prisma.$disconnect();

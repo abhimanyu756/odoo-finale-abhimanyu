@@ -5,6 +5,14 @@ import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Modal, Field } from '../components/ui';
 
+const APPROVAL_LABELS = { NONE: 'No validation', MANAGER: 'Manager', OFFICER: 'Officer' };
+const WORK_ENTRY_LABELS = {
+  PAID_LEAVE: 'Leave Work Entry',
+  UNPAID_LEAVE: 'Unpaid Leave',
+  SICK_LEAVE: 'Sick Leave Work Entry',
+  COMPENSATORY_LEAVE: 'Compensatory Work Entry',
+};
+
 export default function TimeOffTypes() {
   const { data: types, loading, error, refetch } = useFetch('/time-off/types');
   const [editing, setEditing] = useState(null);
@@ -29,8 +37,8 @@ export default function TimeOffTypes() {
             <table className="o-table">
               <thead>
                 <tr>
-                  <th>Name</th><th>Code</th><th>Unit</th>
-                  <th>Requires Allocation</th><th>Requires Approval</th><th>Paid</th><th>Status</th>
+                  <th>Type</th><th>Code</th><th>Unit</th>
+                  <th>Allocation</th><th>Approval</th><th>Payroll / Work Entry</th><th>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -44,9 +52,11 @@ export default function TimeOffTypes() {
                     </td>
                     <td className="font-mono text-xs text-ink-soft">{t.code}</td>
                     <td>{t.unit === 'HOURS' ? 'Hours' : 'Days'}</td>
-                    <td>{t.requiresAllocation ? 'Yes' : 'No'}</td>
-                    <td>{t.requiresApproval ? 'Yes' : 'No'}</td>
-                    <td>{t.isPaid ? 'Paid' : <span className="text-amber-600">Unpaid</span>}</td>
+                    <td>{t.requiresAllocation ? 'Required' : 'No'}</td>
+                    <td>{APPROVAL_LABELS[t.approvalMode] ?? '—'}</td>
+                    <td className={t.isPaid ? '' : 'text-amber-600'}>
+                      {WORK_ENTRY_LABELS[t.workEntry] ?? '—'}
+                    </td>
                     <td><StatusBadge value={t.isActive ? 'ACTIVE' : 'INACTIVE'} /></td>
                   </tr>
                 ))}
@@ -81,8 +91,10 @@ function TypeModal({ type, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: type.name ?? '', code: type.code ?? '', unit: type.unit ?? 'DAYS',
     requiresAllocation: type.requiresAllocation ?? true,
-    requiresApproval: type.requiresApproval ?? true,
-    isPaid: type.isPaid ?? true, color: type.color ?? '#714B67',
+    approvalMode: type.approvalMode ?? 'MANAGER',
+    workEntry: type.workEntry ?? 'PAID_LEAVE',
+    description: type.description ?? '',
+    color: type.color ?? '#714B67',
     isActive: type.isActive ?? true,
   });
   const [busy, setBusy] = useState(false);
@@ -130,17 +142,44 @@ function TypeModal({ type, onClose, onSaved }) {
               <option value="HOURS">Hours</option>
             </select>
           </Field>
-          <Field label="Colour">
+          <Field label="Approval" hint="Who signs off a request of this type">
+            <select className="o-input" value={form.approvalMode}
+              onChange={(e) => set('approvalMode', e.target.value)}>
+              {Object.entries(APPROVAL_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Payroll / Work Entry" hint="How payroll treats approved leave of this type">
+            <select className="o-input" value={form.workEntry}
+              onChange={(e) => set('workEntry', e.target.value)}>
+              {Object.entries(WORK_ENTRY_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Display Colour">
             <input type="color" className="o-input h-9 p-1" value={form.color}
               onChange={(e) => set('color', e.target.value)} />
           </Field>
         </div>
+
+        <Field label="Configuration Notes" hint="Shown to HR when configuring policy; not visible to employees">
+          <textarea className="o-input" rows={2} value={form.description}
+            onChange={(e) => set('description', e.target.value)}
+            placeholder="e.g. Standard annual leave. Balance comes from approved allocations." />
+        </Field>
         <Toggle label="Requires allocation" checked={form.requiresAllocation} onChange={(v) => set('requiresAllocation', v)}
           hint="Approved requests consume an approved allocation and cannot exceed the balance." />
-        <Toggle label="Requires approval" checked={form.requiresApproval} onChange={(v) => set('requiresApproval', v)}
-          hint="When off, requests are approved on submission." />
-        <Toggle label="Paid leave" checked={form.isPaid} onChange={(v) => set('isPaid', v)}
-          hint="Unpaid leave feeds the payroll deduction rule." />
+        <p className="rounded border border-hairline bg-gray-50 px-2.5 py-1.5 text-xs text-ink-soft">
+          {form.approvalMode === 'NONE'
+            ? 'Requests are approved automatically on submission.'
+            : `Requests must be approved by the ${APPROVAL_LABELS[form.approvalMode].toLowerCase()}.`}
+          {' '}
+          {form.workEntry === 'UNPAID_LEAVE'
+            ? 'Approved days feed the payroll unpaid-leave deduction.'
+            : 'Approved days are paid and do not reduce salary.'}
+        </p>
         <Toggle label="Active" checked={form.isActive} onChange={(v) => set('isActive', v)} />
         {error && <p className="rounded border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{error}</p>}
       </form>

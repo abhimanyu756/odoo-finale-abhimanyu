@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { LogOut, ChevronDown, Clock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { isHr, isPayroll, isAdmin, ROLE_LABELS } from '../lib/roles';
@@ -47,22 +47,70 @@ const linkClass = ({ isActive }) =>
 
 function NavDropdown({ item }) {
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState(null);
+  const ref = useRef(null);
+  const btnRef = useRef(null);
+
+  // The nav scrolls horizontally, and overflow-x:auto also clips vertically —
+  // an absolutely positioned menu is cut off by the 56px-tall header row. A
+  // fixed-position panel anchored to the button escapes that clipping box.
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setCoords({ top: r.bottom + 4, left: r.left });
+  };
+
+  const toggle = () => {
+    if (!open) place();
+    setOpen((o) => !o);
+  };
+
+  // Opening on hover meant the menu was already open by the time a click
+  // landed, so the click's toggle immediately closed it again. Click-only,
+  // with outside-click and Escape to dismiss.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointerDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open]);
+
+  // useLocation re-renders on navigation; window.location would go stale.
+  const { pathname } = useLocation();
+  const active = item.children.some((c) => pathname.startsWith(c.to));
+
   return (
-    <div
-      className="relative"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
+    <div className="relative" ref={ref}>
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 rounded px-2.5 py-1.5 text-sm text-ink-soft transition-colors hover:bg-odoo-50 hover:text-odoo-600"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={`flex items-center gap-1 rounded px-2.5 py-1.5 text-sm transition-colors
+          hover:bg-odoo-50 hover:text-odoo-600 ${
+            open || active ? 'bg-odoo-50 font-medium text-odoo-600' : 'text-ink-soft'
+          }`}
       >
         {item.label}
-        <ChevronDown size={13} />
+        <ChevronDown size={13} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
       </button>
-      {open && (
-        <div className="absolute left-0 top-full z-30 w-52 rounded-md border border-hairline bg-white py-1 shadow-lg">
+      {open && coords && (
+        <div role="menu"
+          style={{ top: coords.top, left: coords.left }}
+          className="fixed z-50 w-52 rounded-md border border-hairline bg-white py-1 shadow-lg">
           {item.children.map((c) => (
             <NavLink
               key={c.to}

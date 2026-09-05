@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Check, Wallet } from 'lucide-react';
+import { Plus, Check, Wallet, Search, X } from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -14,6 +14,7 @@ export default function TimeOffAllocations() {
   const list = useList('/time-off/allocations');
   const { data: types } = useFetch('/time-off/types');
   const [creating, setCreating] = useState(false);
+  const [viewing, setViewing] = useState(null);
 
   const approve = async (id, e) => {
     e.stopPropagation();
@@ -41,7 +42,13 @@ export default function TimeOffAllocations() {
       />
 
       <div className="mb-3 flex flex-wrap gap-2">
-        <select className="o-input w-auto" onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+          <input className="o-input pl-8" placeholder="Search by employee or type…"
+            onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
+        </div>
+        <select className="o-input w-auto"
+          onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
           {['DRAFT', 'APPROVED', 'REFUSED'].map((s) => <option key={s} value={s}>{s[0] + s.slice(1).toLowerCase()}</option>)}
         </select>
@@ -61,14 +68,17 @@ export default function TimeOffAllocations() {
                 <thead>
                   <tr>
                     <th>Employee</th><th>Type</th>
-                    <th className="text-right">Allocated</th><th className="text-right">Taken</th>
-                    <th className="text-right">Remaining</th><th>Valid From</th><th>Valid To</th>
+                    <th className="text-right">This Grant</th>
+                    <th className="border-l border-hairline text-right">Total Allocated</th>
+                    <th className="text-right">Taken</th>
+                    <th className="text-right">Remaining</th>
+                    <th className="border-l border-hairline">Valid From</th><th>Valid To</th>
                     <th>Status</th><th />
                   </tr>
                 </thead>
                 <tbody>
                   {list.rows.map((a) => (
-                    <tr key={a.id}>
+                    <tr key={a.id} className="cursor-pointer" onClick={() => setViewing(a)}>
                       <td className="font-medium text-ink">{a.employee?.name}</td>
                       <td>
                         <span className="inline-flex items-center gap-1.5">
@@ -76,10 +86,13 @@ export default function TimeOffAllocations() {
                           {a.timeOffType?.name}
                         </span>
                       </td>
-                      <td className="text-right tabular-nums">{a.amount}</td>
+                      <td className="text-right font-medium tabular-nums text-ink">{a.amount}</td>
+                      <td className="border-l border-hairline text-right tabular-nums text-ink-soft">
+                        {a.balance?.allocated ?? 0}
+                      </td>
                       <td className="text-right tabular-nums text-ink-soft">{a.balance?.taken ?? 0}</td>
                       <td className="text-right font-medium tabular-nums text-odoo-600">{a.balance?.remaining ?? 0}</td>
-                      <td>{date(a.validFrom)}</td>
+                      <td className="border-l border-hairline">{date(a.validFrom)}</td>
                       <td>{a.validTo ? date(a.validTo) : '—'}</td>
                       <td><StatusBadge value={a.status} /></td>
                       <td className="text-right">
@@ -99,10 +112,22 @@ export default function TimeOffAllocations() {
         <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
+      <p className="mt-3 text-xs text-ink-soft">
+        <strong className="text-ink">This Grant</strong> is what this row adds.
+        <strong className="ml-1 text-ink">Total Allocated</strong>, <strong className="text-ink">Taken</strong>
+        and <strong className="text-ink">Remaining</strong> are the employee&apos;s balance across every
+        approved allocation of that leave type — two grants of the same type share one balance.
+      </p>
+
       {creating && (
         <AllocationModal types={types ?? []}
           onClose={() => setCreating(false)}
           onSaved={() => { setCreating(false); list.refetch(); }} />
+      )}
+      {viewing && (
+        <AllocationDetail allocation={viewing}
+          onClose={() => setViewing(null)}
+          onChanged={() => { setViewing(null); list.refetch(); }} />
       )}
     </>
   );
@@ -181,6 +206,124 @@ function AllocationModal({ types, onClose, onSaved }) {
         </Field>
         {error && <p className="rounded border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{error}</p>}
       </form>
+    </Modal>
+  );
+}
+
+const DetailRow = ({ label, children }) => (
+  <div className="flex justify-between border-b border-gray-100 py-2 text-sm">
+    <span className="text-ink-soft">{label}</span>
+    <span className="font-medium text-ink">{children}</span>
+  </div>
+);
+
+// The mockup's "Allocation / <employee>" form view: the grant, the balance it
+// produces, and what has consumed it.
+function AllocationDetail({ allocation, onClose, onChanged }) {
+  const { role } = useAuth();
+  const toast = useToast();
+  const { data, loading, error, refetch } = useFetch(`/time-off/allocations/${allocation.id}`);
+  const [busy, setBusy] = useState(false);
+
+  const act = async (kind) => {
+    setBusy(true);
+    try {
+      await api.post(`/time-off/allocations/${allocation.id}/${kind}`);
+      toast.success(kind === 'approve' ? 'Allocation approved' : 'Allocation refused');
+      onChanged();
+    } catch (err) {
+      toast.error(errorMessage(err));
+      setBusy(false);
+    }
+  };
+
+  const a = data ?? allocation;
+  const unit = a.timeOffType?.unit === 'HOURS' ? 'hours' : 'days';
+
+  return (
+    <Modal
+      open
+      title={`Allocation / ${a.employee?.name ?? ''}`}
+      onClose={onClose}
+      footer={
+        isHr(role) && a.status !== 'APPROVED' ? (
+          <>
+            <button type="button" className="o-btn-danger" disabled={busy} onClick={() => act('refuse')}>
+              <X size={14} /> Refuse
+            </button>
+            <button type="button" className="o-btn-primary" disabled={busy} onClick={() => act('approve')}>
+              <Check size={14} /> Approve
+            </button>
+          </>
+        ) : (
+          <button type="button" className="o-btn-secondary" onClick={onClose}>Close</button>
+        )
+      }
+    >
+      {loading ? <Spinner label="Loading allocation" />
+        : error ? <ErrorState message={error} onRetry={refetch} />
+        : (
+          <div>
+            <DetailRow label="Employee">{a.employee?.name}</DetailRow>
+            <DetailRow label="Time Off Type">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full" style={{ background: a.timeOffType?.color }} />
+                {a.timeOffType?.name}
+              </span>
+            </DetailRow>
+            <DetailRow label="This Grant">{a.amount} {unit}</DetailRow>
+            <DetailRow label="Valid From">{date(a.validFrom)}</DetailRow>
+            <DetailRow label="Valid To">{a.validTo ? date(a.validTo) : 'Open-ended'}</DetailRow>
+            <DetailRow label="Status"><StatusBadge value={a.status} /></DetailRow>
+            {a.notes && <DetailRow label="Notes">{a.notes}</DetailRow>}
+
+            {data?.balance && (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {[
+                  ['Total Allocated', data.balance.allocated],
+                  ['Taken', data.balance.taken],
+                  ['Remaining', data.balance.remaining],
+                ].map(([label, v]) => (
+                  <div key={label} className="rounded-md border border-hairline bg-gray-50 px-2.5 py-2 text-center">
+                    <p className="text-[11px] text-ink-soft">{label}</p>
+                    <p className="text-base font-semibold tabular-nums text-ink">{v}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="mt-2 text-[11px] text-ink-soft">
+              These totals cover <strong>every approved {a.timeOffType?.name} allocation</strong> for this
+              employee, not just this grant — a second grant raises the total rather than
+              creating a separate balance.
+            </p>
+
+            {data?.consumedBy?.length > 0 && (
+              <div className="mt-3">
+                <p className="o-label">Consumed by</p>
+                <table className="o-table">
+                  <tbody>
+                    {data.consumedBy.map((r) => (
+                      <tr key={r.id}>
+                        <td className="text-ink-soft">{date(r.dateFrom)} – {date(r.dateTo)}</td>
+                        <td className="text-right font-medium tabular-nums text-ink">
+                          {r.duration} {unit}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {a.status === 'APPROVED' && (
+              <p className="mt-3 rounded border border-hairline bg-gray-50 px-2.5 py-1.5 text-xs text-ink-soft">
+                Approved allocations back real leave balances and cannot be refused once
+                requests have drawn on them.
+              </p>
+            )}
+          </div>
+        )}
     </Modal>
   );
 }

@@ -15,7 +15,12 @@ import {
 const router = Router();
 router.use(authenticate);
 
+const EDITOR = {
+  select: { id: true, email: true, employee: { select: { firstName: true, lastName: true } } },
+};
+
 const RELATIONS = {
+  editedBy: EDITOR,
   employee: {
     select: {
       id: true,
@@ -31,6 +36,14 @@ const shape = (a) => ({
   ...a,
   workedHours: num(a.workedHours),
   overtimeHours: num(a.overtimeHours),
+  editedBy: a.editedBy
+    ? {
+        id: a.editedBy.id,
+        name: a.editedBy.employee
+          ? `${a.editedBy.employee.firstName} ${a.editedBy.employee.lastName}`
+          : a.editedBy.email,
+      }
+    : null,
   employee: a.employee
     ? {
         id: a.employee.id,
@@ -53,7 +66,7 @@ router.get(
     res.json({
       checkedIn: Boolean(open),
       since: open?.checkIn ?? null,
-      elapsedHours: open ? Number(hoursBetween(open.checkIn, new Date()).toFixed(2)) : 0,
+      elapsedHours: open ? Number(hoursBetween(open.checkIn, new Date()).toFixed(4)) : 0,
       todayHours: await todayTotals(req.employee.id),
     });
   }),

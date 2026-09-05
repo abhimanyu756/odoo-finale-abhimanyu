@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, CalendarClock, Check, X } from 'lucide-react';
+import { Plus, CalendarClock, Check, X, Search } from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -51,7 +51,13 @@ export default function TimeOffRequests() {
       )}
 
       <div className="mb-3 flex flex-wrap gap-2">
-        <select className="o-input w-auto" onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+          <input className="o-input pl-8" placeholder="Search by employee, type or reason…"
+            onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
+        </div>
+        <select className="o-input w-auto"
+          onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
           {['TO_APPROVE', 'APPROVED', 'REFUSED', 'CANCELLED'].map((s) => (
             <option key={s} value={s}>{s.replace('_', ' ')}</option>
@@ -73,7 +79,7 @@ export default function TimeOffRequests() {
                 <thead>
                   <tr>
                     <th>Employee</th><th>Type</th><th>From</th><th>To</th>
-                    <th className="text-right">Duration</th><th>Status</th><th />
+                    <th className="text-right">Duration</th><th>Reason</th><th>Approver</th><th>Status</th><th />
                   </tr>
                 </thead>
                 <tbody>
@@ -90,6 +96,12 @@ export default function TimeOffRequests() {
                       <td>{date(r.dateTo)}</td>
                       <td className="text-right tabular-nums">
                         {r.duration} {r.timeOffType?.unit === 'HOURS' ? 'h' : 'd'}
+                      </td>
+                      <td className="max-w-[14rem] truncate text-ink-soft" title={r.reason ?? ''}>
+                        {r.reason || <span className="text-xs">—</span>}
+                      </td>
+                      <td className="text-ink-soft">
+                        {r.approvedBy?.name ?? <span className="text-xs">Pending</span>}
                       </td>
                       <td><StatusBadge value={r.status} /></td>
                       <td className="text-right">
@@ -122,9 +134,17 @@ function ApproveActions({ request, onDone }) {
 
   const act = async (e, kind) => {
     e.stopPropagation();
+    // refusalReason exists on the record and is shown back to the employee, so
+    // a refusal must actually collect one rather than leaving the field null.
+    let refusalReason;
+    if (kind === 'refuse') {
+      refusalReason = window.prompt('Reason for refusing this request?');
+      if (refusalReason === null) return;
+    }
     setBusy(true);
     try {
-      await api.post(`/time-off/requests/${request.id}/${kind}`);
+      await api.post(`/time-off/requests/${request.id}/${kind}`,
+        kind === 'refuse' ? { refusalReason: refusalReason || null } : undefined);
       toast.success(kind === 'approve' ? 'Request approved' : 'Request refused');
       onDone();
     } catch (err) {
@@ -231,11 +251,18 @@ function RequestDetail({ request, onClose, onChanged }) {
   const { role } = useAuth();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [refusing, setRefusing] = useState(false);
+  const [refusalReason, setRefusalReason] = useState('');
 
   const act = async (kind) => {
+    if (kind === 'refuse' && !refusing) {
+      setRefusing(true);
+      return;
+    }
     setBusy(true);
     try {
-      await api.post(`/time-off/requests/${request.id}/${kind}`);
+      await api.post(`/time-off/requests/${request.id}/${kind}`,
+        kind === 'refuse' ? { refusalReason: refusalReason.trim() || null } : undefined);
       toast.success(kind === 'approve' ? 'Approved' : 'Refused');
       onChanged();
       onClose();
@@ -251,8 +278,14 @@ function RequestDetail({ request, onClose, onChanged }) {
       footer={
         isHr(role) && request.status === 'TO_APPROVE' ? (
           <>
-            <button type="button" className="o-btn-danger" disabled={busy} onClick={() => act('refuse')}>Refuse</button>
-            <button type="button" className="o-btn-primary" disabled={busy} onClick={() => act('approve')}>Approve</button>
+            <button type="button" className="o-btn-danger" disabled={busy} onClick={() => act('refuse')}>
+              {refusing ? 'Confirm Refusal' : 'Refuse'}
+            </button>
+            {!refusing && (
+              <button type="button" className="o-btn-primary" disabled={busy} onClick={() => act('approve')}>
+                Approve
+              </button>
+            )}
           </>
         ) : (
           <button type="button" className="o-btn-secondary" onClick={onClose}>Close</button>
@@ -266,8 +299,33 @@ function RequestDetail({ request, onClose, onChanged }) {
           {request.duration} {request.timeOffType?.unit === 'HOURS' ? 'hours' : 'days'}
         </Row>
         <Row label="Status"><StatusBadge value={request.status} /></Row>
-        {request.reason && <Row label="Reason">{request.reason}</Row>}
-        {request.refusalReason && <Row label="Refusal Reason">{request.refusalReason}</Row>}
+        <Row label="Reason">
+          {request.reason || <span className="font-normal text-ink-soft">Not provided</span>}
+        </Row>
+        {request.refusalReason && (
+          <Row label="Refusal Reason">
+            <span className="text-red-700">{request.refusalReason}</span>
+          </Row>
+        )}
+        {request.approvedBy && (
+          <Row label={request.status === 'REFUSED' ? 'Refused By' : 'Approved By'}>
+            {request.approvedBy.name}
+          </Row>
+        )}
+        {request.approvedAt && (
+          <Row label={request.status === 'REFUSED' ? 'Refused On' : 'Approved On'}>
+            {date(request.approvedAt)}
+          </Row>
+        )}
+
+        {refusing && (
+          <label className="mt-3 block">
+            <span className="o-label">Reason for refusal</span>
+            <textarea className="o-input" rows={2} autoFocus value={refusalReason}
+              onChange={(e) => setRefusalReason(e.target.value)}
+              placeholder="Shown to the employee on their request" />
+          </label>
+        )}
         {request.timeOffType?.requiresAllocation && (
           <p className="mt-3 rounded border border-hairline bg-gray-50 px-2.5 py-1.5 text-xs text-ink-soft">
             Approving this request consumes the employee&apos;s {request.timeOffType.name} allocation.

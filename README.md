@@ -50,14 +50,11 @@ npm run dev                          # http://localhost:5173
 
 | Email | Password | Role | Sees |
 |---|---|---|---|
-| `admin@oxp.com` | `Admin@123` | Administrator | Everything, incl. User Management |
-| `aarav@oxp.com` | `Pass@1234` | Payroll Admin | Full payroll + salary rule config |
-| `nisha@oxp.com` | `Pass@1234` | Payroll User | Payruns/payslips; salary config read-only |
-| `sara@oxp.com` | `Pass@1234` | HR Manager | HR modules; **no** payroll access |
-| *(see below)* | `Pass@1234` | Employee | Own records only |
-
-The Employee demo account is deliberately pointed at a **real mailbox** so the
-password-reset email can be shown arriving; check `User.email` for `Rohan Patel`.
+| `admin@odoo.com` | `Admin@123` | Administrator | Everything, incl. User Management |
+| `aarav@odoo.com` | `Pass@1234` | Payroll Admin | Full payroll + salary rule config |
+| `nisha@odoo.com` | `Pass@1234` | Payroll User | Payruns/payslips; salary config read-only |
+| `sara@odoo.com` | `Pass@1234` | HR Manager | HR modules; **no** payroll access |
+| `rohan@odoo.com` | `Pass@1234` | Employee | Own records only |
 
 ### Password reset
 
@@ -83,14 +80,13 @@ delivery. To send for real, set `SMTP_USER` and `SMTP_PASS` (a Gmail **App
 Password**, not the account password) in `server/.env` and restart the API.
 
 **Payslip recipients must be real mailboxes.** `Employee.workEmail` is where payslips
-are delivered; the seed's `@oxp.com` addresses do not exist, and Gmail accepts them
-at SMTP level before bouncing them back minutes later. Point them at addresses you
-control before demoing — Gmail's `+alias` form (`you+aarav@gmail.com`) works well:
-every message lands in one inbox, but SMTP treats each as a distinct recipient, so
-per-employee delivery is genuinely demonstrated.
+are delivered; the seed's `@odoo.com` addresses do not exist, and Gmail accepts them
+at SMTP level before bouncing them back minutes later. Before demoing real delivery,
+edit one or two employees' work email to an address you control (Employees → open an
+employee → Edit → Work Email).
 
 Login addresses (`User.email`) are separate from payslip addresses
-(`Employee.workEmail`), so the short `@oxp.com` logins above keep working regardless.
+(`Employee.workEmail`), so changing a work email does not change how anyone signs in.
 
 A payrun sends in concurrent batches of 4 — a Gmail round trip is ~4s, so a
 12-payslip run completes in ~20s rather than the ~50s a serial loop would take.
@@ -239,7 +235,7 @@ hidden in the UI.
 ## Demo script (5 minutes)
 
 **Scenario A — employee to payslip**
-1. Sign in as `aarav@oxp.com`. The dashboard shows live totals across July/August.
+1. Sign in as `aarav@odoo.com`. The dashboard shows live totals across July/August.
 2. Employees → open **Aarav Mehta** → smart buttons show related Contracts,
    Attendance and Time Off, filtered to that employee.
 3. Payroll → Salary Rules → open **Provident Fund**; edit the expression and watch
@@ -254,7 +250,7 @@ hidden in the UI.
 1. Time Off → Types: show `Paid Time Off` requires an allocation, `Unpaid Leave` does not.
 2. Allocations: an approved 18-day PTO grant, with taken/remaining derived live.
 3. Requests → New Request over a weekend — duration counts only working days.
-4. Sign in as `sara@oxp.com` (HR Manager) and approve it; the balance drops.
+4. Sign in as `sara@odoo.com` (HR Manager) and approve it; the balance drops.
    Request more than the balance and approval is refused with the exact shortfall.
 5. Note that Sara has no Payroll menu at all — role separation is enforced server-side.
 

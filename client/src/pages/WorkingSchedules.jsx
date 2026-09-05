@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { Plus, Trash2, CalendarRange } from 'lucide-react';
+import { Plus, Trash2, CalendarRange, Search } from 'lucide-react';
 import { useList } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { titleCase } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Modal, Field } from '../components/ui';
+import {
+  PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field,
+} from '../components/ui';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -31,17 +33,49 @@ export default function WorkingSchedules() {
         }
       />
 
+      <div className="mb-3 flex flex-wrap gap-2">
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+          <input className="o-input pl-8" placeholder="Search schedules…"
+            onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
+        </div>
+        <select
+          className="o-input w-auto"
+          value={list.params.scheduleType ?? ''}
+          onChange={(e) => list.setParam({ scheduleType: e.target.value || undefined })}
+          aria-label="Filter by schedule type"
+        >
+          <option value="">All types</option>
+          {['FULL_TIME', 'PART_TIME', 'FLEXIBLE'].map((t) => (
+            <option key={t} value={t}>{titleCase(t)}</option>
+          ))}
+        </select>
+        <select
+          className="o-input w-auto"
+          value={list.params.status ?? ''}
+          onChange={(e) => list.setParam({ status: e.target.value || undefined })}
+          aria-label="Filter by status"
+        >
+          <option value="">Any status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+
       <div className="o-card overflow-hidden">
         {list.loading ? <Spinner label="Loading schedules" />
           : list.error ? <ErrorState message={list.error} onRetry={list.refetch} />
-          : !list.rows.length ? <EmptyState icon={CalendarRange} title="No schedules yet" />
+          : !list.rows.length ? (
+            <EmptyState icon={CalendarRange} title="No schedules match these filters"
+              hint="Clear the search or filters, or create a new schedule." />
+          )
           : (
             <table className="o-table">
               <thead>
                 <tr>
                   <th>Schedule Name</th><th>Type</th>
                   <th className="text-right">Days / Week</th><th className="text-right">Hours / Week</th>
-                  <th>Company</th><th>Status</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -51,14 +85,20 @@ export default function WorkingSchedules() {
                     <td>{titleCase(s.scheduleType)}</td>
                     <td className="text-right tabular-nums">{s.daysPerWeek}</td>
                     <td className="text-right font-medium tabular-nums">{s.hoursPerWeek}h</td>
-                    <td className="text-ink-soft">{s.company?.name ?? '—'}</td>
                     <td><StatusBadge value={s.isActive ? 'ACTIVE' : 'INACTIVE'} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
+        <Pagination page={list.page} pages={list.pages} total={list.total}
+          onPage={(p) => list.setParam({ page: p })} />
       </div>
+
+      <p className="mt-3 text-xs text-ink-soft">
+        Select a schedule to open its form view. Weekly hours are derived from the day
+        rows, never entered by hand.
+      </p>
 
       {editing && (
         <ScheduleModal schedule={editing}
@@ -157,6 +197,15 @@ function ScheduleModal({ schedule, onClose, onSaved }) {
               onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))} />
           </Field>
         </div>
+
+        <label className="mb-4 flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.isActive}
+            onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))} />
+          Active
+          <span className="text-xs text-ink-soft">
+            — inactive schedules stay assigned but are hidden from new selections
+          </span>
+        </label>
 
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-ink">Weekly Schedule</h3>

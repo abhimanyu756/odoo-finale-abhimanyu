@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Layers } from 'lucide-react';
+import { Plus, Layers, Search } from 'lucide-react';
 import { useList } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -26,6 +26,14 @@ export default function SalaryStructures() {
           )
         }
       />
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+          <input className="o-input pl-8" placeholder="Search structures…"
+            onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
+        </div>
+      </div>
 
       <div className="o-card overflow-hidden">
         {list.loading ? <Spinner label="Loading structures" />

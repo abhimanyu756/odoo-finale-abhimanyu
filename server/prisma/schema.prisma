@@ -30,9 +30,11 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  employee      Employee?
-  refreshTokens RefreshToken[]
-  resetTokens   PasswordResetToken[]
+  employee         Employee?
+  refreshTokens    RefreshToken[]
+  resetTokens      PasswordResetToken[]
+  approvedLeave    LeaveRequest[]       @relation("LeaveApprover")
+  editedAttendance Attendance[]         @relation("AttendanceEditor")
 
   @@index([role])
 }
@@ -277,6 +279,8 @@ model Attendance {
   updatedAt     DateTime         @updatedAt
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  // Kept as SetNull so deleting the editing user never erases the correction.
+  editedBy User?    @relation("AttendanceEditor", fields: [editedById], references: [id], onDelete: SetNull)
 
   @@index([employeeId, checkIn])
   @@index([checkIn])
@@ -291,19 +295,40 @@ enum LeaveUnit {
   HOURS
 }
 
+// Who signs off a request of this type. NONE auto-approves on submission.
+enum LeaveApprovalMode {
+  NONE
+  MANAGER
+  OFFICER
+}
+
+// How approved leave of this type is treated by payroll.
+enum WorkEntryType {
+  PAID_LEAVE
+  UNPAID_LEAVE
+  SICK_LEAVE
+  COMPENSATORY_LEAVE
+}
+
 model TimeOffType {
-  id                 String    @id @default(uuid())
-  name               String    @unique
-  code               String    @unique
-  unit               LeaveUnit @default(DAYS)
+  id                 String            @id @default(uuid())
+  name               String            @unique
+  code               String            @unique
+  unit               LeaveUnit         @default(DAYS)
   // When true, approved requests must consume an approved allocation.
-  requiresAllocation Boolean   @default(true)
-  requiresApproval   Boolean   @default(true)
+  requiresAllocation Boolean           @default(true)
+  // approvalMode and workEntry are what HR configures; requiresApproval and
+  // isPaid are derived from them on write so existing approval and payroll
+  // logic keeps a single boolean to test.
+  approvalMode       LeaveApprovalMode @default(MANAGER)
+  requiresApproval   Boolean           @default(true)
+  workEntry          WorkEntryType     @default(PAID_LEAVE)
+  description        String?
   // Whether approved leave under this type is paid (feeds payroll rules).
-  isPaid             Boolean   @default(true)
-  color              String    @default("#714B67")
-  isActive           Boolean   @default(true)
-  createdAt          DateTime  @default(now())
+  isPaid             Boolean           @default(true)
+  color              String            @default("#714B67")
+  isActive           Boolean           @default(true)
+  createdAt          DateTime          @default(now())
 
   requests    LeaveRequest[]
   allocations LeaveAllocation[]
@@ -358,6 +383,7 @@ model LeaveRequest {
   timeOffType  TimeOffType      @relation(fields: [timeOffTypeId], references: [id])
   allocationId String?
   allocation   LeaveAllocation? @relation(fields: [allocationId], references: [id])
+  approvedBy   User?            @relation("LeaveApprover", fields: [approvedById], references: [id], onDelete: SetNull)
 
   @@index([employeeId, dateFrom])
   @@index([status])

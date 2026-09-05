@@ -4,10 +4,18 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { time } from '../lib/format';
 
-const asHours = (v) => {
-  const h = Math.floor(v);
-  const m = Math.round((v - h) * 60);
-  return `${h}h${String(m).padStart(2, '0')}`;
+// Rounding minutes independently of hours produced "0h60" at 0.999h, and a
+// session under a minute read as "0h00". Resolve to whole minutes first, and
+// fall back to seconds so a brief session is still visible.
+const asDuration = (hours, zero = '—') => {
+  const totalMinutes = Math.floor((hours ?? 0) * 60);
+  if (totalMinutes < 1) {
+    const seconds = Math.floor((hours ?? 0) * 3600);
+    return seconds > 0 ? `${seconds}s` : zero;
+  }
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
 };
 
 // Mirrors the mockup: a green dot when checked in, elapsed time since the open
@@ -88,13 +96,13 @@ export default function AttendanceWidget({ onClose }) {
                   {status?.checkedIn ? `${time(status.since)} — Now` : 'Not checked in'}
                 </span>
                 <span className="font-medium tabular-nums text-ink">
-                  {status?.checkedIn ? asHours(live) : '—'}
+                  {status?.checkedIn ? asDuration(live) : '—'}
                 </span>
               </div>
               <div className="flex items-center justify-between py-2 text-sm">
                 <span className="text-ink-soft">Today</span>
                 <span className="font-medium tabular-nums text-ink">
-                  {asHours((status?.todayHours ?? 0) + (status?.checkedIn ? live : 0))}
+                  {asDuration((status?.todayHours ?? 0) + (status?.checkedIn ? live : 0), '0m')}
                 </span>
               </div>
 

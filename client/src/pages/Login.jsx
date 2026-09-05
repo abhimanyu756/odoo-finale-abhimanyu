@@ -6,11 +6,11 @@ import AuthLayout from '../components/AuthLayout';
 import { PasswordInput } from '../components/ui';
 
 const DEMO = [
-  ['admin@oxp.com', 'Admin@123', 'Administrator'],
-  ['aarav@oxp.com', 'Pass@1234', 'Payroll Admin'],
-  ['nisha@oxp.com', 'Pass@1234', 'Payroll User'],
-  ['sara@oxp.com', 'Pass@1234', 'HR Manager'],
-  ['rohan@oxp.com', 'Pass@1234', 'Employee'],
+  ['admin@odoo.com', 'Admin@123', 'Administrator'],
+  ['aarav@odoo.com', 'Pass@1234', 'Payroll Admin'],
+  ['nisha@odoo.com', 'Pass@1234', 'Payroll User'],
+  ['sara@odoo.com', 'Pass@1234', 'HR Manager'],
+  ['rohan@odoo.com', 'Pass@1234', 'Employee'],
 ];
 
 export default function Login() {
@@ -50,7 +50,7 @@ export default function Login() {
               autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@oxp.com"
+              placeholder="you@odoo.com"
               required
             />
           </label>

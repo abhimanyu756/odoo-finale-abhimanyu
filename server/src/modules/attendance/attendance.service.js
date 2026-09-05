@@ -57,11 +57,15 @@ export async function todayTotals(employeeId, tx = prisma) {
   const rows = await tx.attendance.findMany({
     where: { employeeId, checkIn: { gte: startOfDay(now), lte: endOfDay(now) } },
   });
+  // Computed from the raw timestamps rather than the stored workedHours: that
+  // column is Decimal(6,2) hours, so its smallest unit is 36 seconds and a
+  // short session would round away to zero on the widget.
   const closed = rows
     .filter((r) => r.checkOut)
-    .reduce((s, r) => s + Number(r.workedHours), 0);
+    .reduce((s, r) => s + hoursBetween(r.checkIn, r.checkOut), 0);
   const open = rows
     .filter((r) => !r.checkOut)
     .reduce((s, r) => s + hoursBetween(r.checkIn, now), 0);
-  return Number((closed + open).toFixed(2));
+
+  return Number((closed + open).toFixed(4));
 }

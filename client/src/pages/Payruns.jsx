@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Wallet, ArrowRight } from 'lucide-react';
+import { Plus, Wallet, ArrowRight, Search } from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
@@ -23,6 +23,14 @@ export default function Payruns() {
           </button>
         }
       />
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+          <input className="o-input pl-8" placeholder="Search payruns…"
+            onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
+        </div>
+      </div>
 
       <div className="o-card overflow-hidden">
         {list.loading ? <Spinner label="Loading payruns" />
@@ -82,6 +90,7 @@ function PayrunWizard({ onClose, onCreated }) {
   });
   const [candidates, setCandidates] = useState([]);
   const [selected, setSelected] = useState(new Set());
+  const [employeeSearch, setEmployeeSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -128,6 +137,15 @@ function PayrunWizard({ onClose, onCreated }) {
   };
 
   const eligible = candidates.filter((c) => c.eligible);
+  // Filtering is client-side: the whole candidate set is already loaded, so
+  // searching must not drop selections made before the filter was typed.
+  const term = employeeSearch.trim().toLowerCase();
+  const visible = term
+    ? candidates.filter((c) =>
+        c.name.toLowerCase().includes(term)
+        || (c.department?.name ?? '').toLowerCase().includes(term)
+        || (c.contract?.reference ?? '').toLowerCase().includes(term))
+    : candidates;
   const toggle = (id) =>
     setSelected((s) => {
       const next = new Set(s);
@@ -192,30 +210,58 @@ function PayrunWizard({ onClose, onCreated }) {
         </form>
       ) : (
         <>
-          <div className="mb-2 flex items-center justify-between text-xs text-ink-soft">
-            <span>{eligible.length} eligible of {candidates.length} employees</span>
-            <div className="flex gap-2">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 sm:max-w-xs">
+              <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+              <input className="o-input pl-8" placeholder="Search employees…"
+                value={employeeSearch} onChange={(e) => setEmployeeSearch(e.target.value)} />
+            </div>
+            <span className="text-xs tabular-nums text-ink-soft">
+              {visible.length ? `1-${visible.length} / ${candidates.length}` : `0 / ${candidates.length}`}
+            </span>
+            <div className="ml-auto flex gap-2">
               <button type="button" className="o-btn-ghost px-2 py-1"
-                onClick={() => setSelected(new Set(eligible.map((c) => c.id)))}>Select all</button>
+                onClick={() => setSelected((s2) => {
+                  const next = new Set(s2);
+                  visible.filter((c) => c.eligible).forEach((c) => next.add(c.id));
+                  return next;
+                })}>
+                Select {term ? 'shown' : 'all'}
+              </button>
               <button type="button" className="o-btn-ghost px-2 py-1"
                 onClick={() => setSelected(new Set())}>Clear</button>
             </div>
           </div>
+          <p className="mb-2 text-xs text-ink-soft">
+            {eligible.length} eligible of {candidates.length} employees ·{' '}
+            <strong className="text-ink">{selected.size} selected</strong>
+          </p>
           <div className="max-h-96 overflow-y-auto rounded-md border border-hairline">
             <table className="o-table">
               <thead>
-                <tr><th className="w-10" /><th>Employee</th><th>Department</th><th>Contract</th><th className="text-right">Wage</th></tr>
+                <tr>
+                  <th className="w-10" /><th>Employee</th><th>Working Hours</th>
+                  <th>Start Date</th><th>Contract</th><th className="text-right">Wage</th>
+                </tr>
               </thead>
               <tbody>
-                {candidates.map((c) => (
+                {visible.map((c) => (
                   <tr key={c.id} className={c.eligible ? 'cursor-pointer' : 'opacity-60'}
                     onClick={() => c.eligible && toggle(c.id)}>
                     <td>
                       <input type="checkbox" disabled={!c.eligible} checked={selected.has(c.id)}
                         onChange={() => toggle(c.id)} onClick={(e) => e.stopPropagation()} />
                     </td>
-                    <td className="font-medium text-ink">{c.name}</td>
-                    <td className="text-ink-soft">{c.department?.name ?? '—'}</td>
+                    <td className="font-medium text-ink">
+                      {c.name}
+                      {c.department && (
+                        <span className="ml-1.5 text-xs font-normal text-ink-soft">{c.department.name}</span>
+                      )}
+                    </td>
+                    <td className="text-ink-soft">
+                      {c.workingHours != null ? `${c.workingHours} hours/week` : '—'}
+                    </td>
+                    <td className="text-ink-soft">{c.contract ? date(c.contract.startDate) : '—'}</td>
                     <td className="text-xs">
                       {c.contract
                         ? <span className="font-mono">{c.contract.reference}</span>
@@ -224,6 +270,11 @@ function PayrunWizard({ onClose, onCreated }) {
                     <td className="text-right tabular-nums">{c.contract ? money(c.contract.wage) : '—'}</td>
                   </tr>
                 ))}
+                {visible.length === 0 && (
+                  <tr><td colSpan={6} className="py-6 text-center text-sm text-ink-soft">
+                    No employees match “{employeeSearch}”.
+                  </td></tr>
+                )}
               </tbody>
             </table>
           </div>

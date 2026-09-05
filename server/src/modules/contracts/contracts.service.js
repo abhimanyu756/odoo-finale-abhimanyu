@@ -50,6 +50,7 @@ export async function contractForPeriod(employeeId, periodStart, periodEnd, tx =
       OR: [{ endDate: null }, { endDate: { gte: periodStart } }],
     },
     orderBy: [{ status: 'asc' }, { startDate: 'desc' }],
+    include: { workingSchedule: { select: { name: true, hoursPerWeek: true } } },
   });
 
   return candidates.find((c) => c.status === 'RUNNING') ?? candidates[0] ?? null;

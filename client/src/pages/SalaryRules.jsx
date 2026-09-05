@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Calculator, CheckCircle2, XCircle } from 'lucide-react';
+import { Plus, Calculator, CheckCircle2, XCircle, Search } from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -42,6 +42,11 @@ export default function SalaryRules() {
       />
 
       <div className="mb-3 flex flex-wrap gap-2">
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+          <input className="o-input pl-8" placeholder="Search salary rules…"
+            onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
+        </div>
         <select className="o-input w-auto" value={list.params.structureId ?? ''}
           onChange={(e) => list.setParam({ structureId: e.target.value || undefined })}>
           <option value="">All structures</option>

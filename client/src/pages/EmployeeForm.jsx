@@ -259,8 +259,8 @@ export default function EmployeeForm() {
                     : '—'}
                 </ReadRow>
                 <ReadRow label="Work Location">{value(employee.workLocation)}</ReadRow>
-                <ReadRow label="Company">{value(employee.company?.name)}</ReadRow>
                 <ReadRow label="Employee Type">{titleCase(employee.employeeType)}</ReadRow>
+                <ReadRow label="Company">{value(employee.company?.name)}</ReadRow>
                 <ReadRow label="Hire Date">{date(employee.hireDate)}</ReadRow>
                 <div>
                   <p className="o-label">Status</p>

@@ -6,7 +6,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { isHr } from '../lib/roles';
-import { time, hours, date } from '../lib/format';
+import { time, hours, date, titleCase } from '../lib/format';
 import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field } from '../components/ui';
 
 export default function Attendance() {
@@ -124,6 +124,7 @@ function AttendanceModal({ record, employees, onClose, onSaved }) {
     checkIn: toLocalInput(record.checkIn),
     checkOut: toLocalInput(record.checkOut),
     notes: record.notes ?? '',
+    status: record.status ?? undefined,
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -135,6 +136,7 @@ function AttendanceModal({ record, employees, onClose, onSaved }) {
     setError(null);
     try {
       const payload = { ...form, checkOut: form.checkOut || null, notes: form.notes || null };
+      if (isNew) delete payload.status;
       if (isNew) await api.post('/attendance', payload);
       else await api.patch(`/attendance/${record.id}`, payload);
       toast.success(isNew ? 'Attendance created' : 'Attendance corrected');
@@ -160,7 +162,9 @@ function AttendanceModal({ record, employees, onClose, onSaved }) {
   return (
     <Modal
       open
-      title={isNew ? 'New Attendance' : `Attendance / ${record.employee?.name}`}
+      title={isNew
+        ? 'New Attendance'
+        : `Attendance / ${record.employee?.name} / ${date(record.checkIn)}`}
       onClose={onClose}
       footer={
         <>
@@ -173,6 +177,23 @@ function AttendanceModal({ record, employees, onClose, onSaved }) {
       }
     >
       <form id="att-form" onSubmit={submit} className="grid gap-3">
+        {!isNew && (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-hairline bg-gray-50 px-3 py-2.5 sm:grid-cols-4">
+            {[
+              ['Department', record.employee?.department?.name ?? '—'],
+              ['Manager', record.employee?.manager?.name ?? '—'],
+              ['Worked Hours', hours(record.workedHours)],
+              ['Overtime', record.overtimeHours > 0 ? `${hours(record.overtimeHours)} hrs` : '—'],
+              ['Corrected By', record.editedBy?.name ?? (record.isManual ? 'Manual entry' : '—')],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <p className="text-[11px] text-ink-soft">{label}</p>
+                <p className="text-sm font-medium text-ink">{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         <Field label="Employee" required>
           <select className="o-input" value={form.employeeId} onChange={set('employeeId')} required disabled={!isNew}>
             <option value="">Select employee</option>
@@ -185,6 +206,16 @@ function AttendanceModal({ record, employees, onClose, onSaved }) {
         <Field label="Check Out" hint="Leave blank for an open session">
           <input type="datetime-local" className="o-input" value={form.checkOut} onChange={set('checkOut')} />
         </Field>
+        {!isNew && (
+          <Field label="Status" hint="Derived from the schedule; override only to correct a misclassification.">
+            <select className="o-input" value={form.status ?? record.status} onChange={set('status')}>
+              {['PRESENT', 'LATE', 'ABSENT', 'MISSING_CHECKOUT'].map((v) => (
+                <option key={v} value={v}>{titleCase(v)}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+
         <Field label="Notes">
           <textarea className="o-input" rows={2} value={form.notes} onChange={set('notes')} />
         </Field>

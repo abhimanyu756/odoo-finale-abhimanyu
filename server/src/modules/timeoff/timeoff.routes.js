@@ -17,6 +17,11 @@ router.use(authenticate);
 const EMP = { select: { id: true, firstName: true, lastName: true } };
 const named = (e) => (e ? { id: e.id, name: `${e.firstName} ${e.lastName}` } : null);
 
+// The approver is a User; their display name lives on the linked Employee.
+const APPROVER = { select: { id: true, email: true, employee: EMP } };
+const approverName = (u) =>
+  (u ? { id: u.id, email: u.email, name: u.employee ? `${u.employee.firstName} ${u.employee.lastName}` : u.email } : null);
+
 // ---------------------------------------------------------------- Types ----
 router.get(
   '/types',
@@ -30,17 +35,29 @@ const typeSchema = z.object({
   code: z.string().min(1).toUpperCase(),
   unit: z.enum(['DAYS', 'HOURS']).default('DAYS'),
   requiresAllocation: z.boolean().default(true),
-  requiresApproval: z.boolean().default(true),
-  isPaid: z.boolean().default(true),
+  approvalMode: z.enum(['NONE', 'MANAGER', 'OFFICER']).default('MANAGER'),
+  workEntry: z
+    .enum(['PAID_LEAVE', 'UNPAID_LEAVE', 'SICK_LEAVE', 'COMPENSATORY_LEAVE'])
+    .default('PAID_LEAVE'),
+  description: z.string().nullish(),
   color: z.string().default('#714B67'),
   isActive: z.boolean().default(true),
+});
+
+// requiresApproval and isPaid are not configured directly; they follow from the
+// approval mode and the payroll work entry, so the two can never disagree.
+const derivePolicy = (data) => ({
+  ...data,
+  ...(data.approvalMode !== undefined ? { requiresApproval: data.approvalMode !== 'NONE' } : {}),
+  ...(data.workEntry !== undefined ? { isPaid: data.workEntry !== 'UNPAID_LEAVE' } : {}),
 });
 
 router.post(
   '/types',
   requireMinRole('HR_MANAGER'),
   asyncHandler(async (req, res) => {
-    res.status(201).json(await prisma.timeOffType.create({ data: typeSchema.parse(req.body) }));
+    const data = derivePolicy(typeSchema.parse(req.body));
+    res.status(201).json(await prisma.timeOffType.create({ data }));
   }),
 );
 
@@ -48,7 +65,7 @@ router.patch(
   '/types/:id',
   requireMinRole('HR_MANAGER'),
   asyncHandler(async (req, res) => {
-    const data = toPatchSchema(typeSchema).parse(req.body);
+    const data = derivePolicy(toPatchSchema(typeSchema).parse(req.body));
     res.json(await prisma.timeOffType.update({ where: { id: req.params.id }, data }));
   }),
 );
@@ -82,13 +99,27 @@ router.get(
       ...(employeeId ? { employeeId } : {}),
       ...(timeOffTypeId ? { timeOffTypeId } : {}),
       ...(status ? { status } : {}),
+      ...(q.search
+        ? {
+            OR: [
+              { employee: { firstName: { contains: q.search, mode: 'insensitive' } } },
+              { employee: { lastName: { contains: q.search, mode: 'insensitive' } } },
+              { timeOffType: { name: { contains: q.search, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
     };
 
     const [rows, total] = await Promise.all([
       prisma.leaveAllocation.findMany({
         where,
         ...paginate(q),
-        orderBy: { validFrom: 'desc' },
+        // Every allocation shares a validFrom, so ordering by it alone is
+        // non-deterministic and a new row can land on a later page. Newest
+        // first guarantees a just-created grant is visible immediately.
+        orderBy: q.sortBy
+          ? [{ [q.sortBy]: q.sortDir }, { createdAt: 'desc' }]
+          : [{ createdAt: 'desc' }],
         include: { employee: EMP, timeOffType: true },
       }),
       prisma.leaveAllocation.count({ where }),
@@ -143,6 +174,68 @@ router.patch(
   }),
 );
 
+router.get(
+  '/allocations/:id',
+  asyncHandler(async (req, res) => {
+    const row = await prisma.leaveAllocation.findUnique({
+      where: { id: req.params.id },
+      include: { employee: EMP, timeOffType: true, requests: { include: { timeOffType: true } } },
+    });
+    if (!row) throw notFound('Allocation not found');
+    if (!isHr(req.user.role)) {
+      const own = await prisma.employee.findFirst({
+        where: { id: row.employeeId, userId: req.user.id },
+        select: { id: true },
+      });
+      if (!own) throw forbidden();
+    }
+    res.json({
+      ...allocShape(row),
+      balance: await balanceFor(row.employeeId, row.timeOffTypeId),
+      // The requests that consumed this allocation, so the form can explain
+      // where the balance went.
+      consumedBy: row.requests
+        .filter((r) => r.status === 'APPROVED')
+        .map((r) => ({
+          id: r.id,
+          dateFrom: r.dateFrom,
+          dateTo: r.dateTo,
+          duration: num(r.duration),
+          status: r.status,
+        })),
+    });
+  }),
+);
+
+router.post(
+  '/allocations/:id/refuse',
+  requireMinRole('HR_MANAGER'),
+  asyncHandler(async (req, res) => {
+    const { notes } = z.object({ notes: z.string().nullish() }).parse(req.body ?? {});
+    const allocation = await prisma.leaveAllocation.findUnique({
+      where: { id: req.params.id },
+      include: { requests: true },
+    });
+    if (!allocation) throw notFound('Allocation not found');
+
+    // Refusing an allocation that approved leave already draws on would push
+    // the employee's balance negative.
+    const consumed = allocation.requests.filter((r) => r.status === 'APPROVED').length;
+    if (consumed) {
+      throw badRequest(
+        `This allocation is already consumed by ${consumed} approved request(s); refuse those first.`,
+      );
+    }
+
+    const row = await prisma.leaveAllocation.update({
+      where: { id: allocation.id },
+      data: { status: 'REFUSED', ...(notes ? { notes } : {}) },
+      include: { employee: EMP, timeOffType: true },
+    });
+    res.json(allocShape(row));
+  }),
+);
+
 router.post(
   '/allocations/:id/approve',
   requireMinRole('HR_MANAGER'),
@@ -190,6 +283,7 @@ const reqShape = (r) => ({
   ...r,
   duration: num(r.duration),
   employee: named(r.employee),
+  approvedBy: approverName(r.approvedBy),
 });
 
 router.get(
@@ -203,14 +297,26 @@ router.get(
       ...(employeeId ? { employeeId } : {}),
       ...(timeOffTypeId ? { timeOffTypeId } : {}),
       ...(status ? { status } : {}),
+      ...(q.search
+        ? {
+            OR: [
+              { employee: { firstName: { contains: q.search, mode: 'insensitive' } } },
+              { employee: { lastName: { contains: q.search, mode: 'insensitive' } } },
+              { timeOffType: { name: { contains: q.search, mode: 'insensitive' } } },
+              { reason: { contains: q.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
     };
 
     const [rows, total] = await Promise.all([
       prisma.leaveRequest.findMany({
         where,
         ...paginate(q),
-        orderBy: q.sortBy ? { [q.sortBy]: q.sortDir } : { dateFrom: 'desc' },
-        include: { employee: EMP, timeOffType: true },
+        orderBy: q.sortBy
+          ? [{ [q.sortBy]: q.sortDir }, { createdAt: 'desc' }]
+          : [{ createdAt: 'desc' }],
+        include: { employee: EMP, timeOffType: true, approvedBy: APPROVER },
       }),
       prisma.leaveRequest.count({ where }),
     ]);
@@ -224,7 +330,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const row = await prisma.leaveRequest.findUnique({
       where: { id: req.params.id },
-      include: { employee: EMP, timeOffType: true, allocation: true },
+      include: { employee: EMP, timeOffType: true, allocation: true, approvedBy: APPROVER },
     });
     if (!row) throw notFound('Request not found');
     res.json(reqShape(row));
@@ -306,7 +412,7 @@ router.post(
           approvedById: req.user.id,
           approvedAt: new Date(),
         },
-        include: { employee: EMP, timeOffType: true },
+        include: { employee: EMP, timeOffType: true, approvedBy: APPROVER },
       });
     });
     res.json(reqShape(row));
@@ -327,7 +433,7 @@ router.post(
         approvedById: req.user.id,
         approvedAt: new Date(),
       },
-      include: { employee: EMP, timeOffType: true },
+      include: { employee: EMP, timeOffType: true, approvedBy: APPROVER },
     });
     res.json(reqShape(row));
   }),

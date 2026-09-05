@@ -56,15 +56,20 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
-    const where = q.search
-      ? { name: { contains: q.search, mode: 'insensitive' } }
-      : {};
+    const { scheduleType, status } = req.query;
+
+    const where = {
+      ...(scheduleType ? { scheduleType } : {}),
+      ...(status === 'active' ? { isActive: true }
+        : status === 'inactive' ? { isActive: false } : {}),
+      ...(q.search ? { name: { contains: q.search, mode: 'insensitive' } } : {}),
+    };
 
     const [rows, total] = await Promise.all([
       prisma.workingSchedule.findMany({
         where,
         ...paginate(q),
-        orderBy: { name: 'asc' },
+        orderBy: q.sortBy ? { [q.sortBy]: q.sortDir } : { name: 'asc' },
         include: { lines: true, company: { select: { id: true, name: true } } },
       }),
       prisma.workingSchedule.count({ where }),

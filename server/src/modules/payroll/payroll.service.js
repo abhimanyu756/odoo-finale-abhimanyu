@@ -28,6 +28,7 @@ export async function eligibleEmployees({ periodStart, periodEnd, departmentId, 
     include: {
       department: { select: { id: true, name: true } },
       jobPosition: { select: { id: true, name: true } },
+      workingSchedule: { select: { name: true, hoursPerWeek: true } },
     },
     orderBy: { firstName: 'asc' },
   });
@@ -35,6 +36,9 @@ export async function eligibleEmployees({ periodStart, periodEnd, departmentId, 
   return Promise.all(
     employees.map(async (e) => {
       const contract = await contractForPeriod(e.id, periodStart, periodEnd);
+      // The contract's own schedule wins over the employee default, since that
+      // is what payroll uses for the period.
+      const schedule = contract?.workingSchedule ?? e.workingSchedule;
       return {
         id: e.id,
         name: `${e.firstName} ${e.lastName}`,
@@ -42,12 +46,15 @@ export async function eligibleEmployees({ periodStart, periodEnd, departmentId, 
         department: e.department,
         jobPosition: e.jobPosition,
         employeeType: e.employeeType,
+        workingHours: schedule ? Number(schedule.hoursPerWeek) : null,
+        workingSchedule: schedule?.name ?? null,
         contract: contract
           ? {
               id: contract.id,
               reference: contract.reference,
               wage: Number(contract.wage),
               status: contract.status,
+              startDate: contract.startDate,
             }
           : null,
         eligible: Boolean(contract),
