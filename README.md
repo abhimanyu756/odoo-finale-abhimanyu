@@ -46,6 +46,50 @@ npm run dev                          # http://localhost:5173
 
 `npm run db:reset` drops, re-migrates and re-seeds in one step.
 
+> **Do not run `npm run seed` or `npm run db:reset` against the demo database.**
+> Both delete every row first. The demo data lives in PostgreSQL, not in a file
+> that gets replayed.
+
+### Demo data
+
+`prisma/seed.js` builds a small 13-employee database from scratch and is
+destructive. `scripts/bulk-data.js` is the opposite: it **tops the live database
+up** to full demo scale and never deletes anything, so records added by hand
+through the UI survive a re-run.
+
+```bash
+npm run data:bulk:dry     # report what it would create
+npm run data:bulk         # top up to 200 employees + the payroll history
+```
+
+Current scale: 200 employees / 194 users across 5 roles, 12 departments,
+24 job positions, 9 working schedules, 308 contracts, ~11k attendance rows,
+10 time off types, ~1.2k allocations, ~350 requests, 5 salary structures,
+48 salary rules, 46 payruns, ~1.5k payslips and ~14k payslip lines.
+
+Payslips are generated through the app's own rule engine (`buildContext` /
+`runRules`), so pressing **Recompute** in the UI reproduces exactly the stored
+figures. Every generated login uses the password `Pass@1234`.
+
+The data deliberately includes the edge cases each screen is meant to surface:
+employees with no bank account, active employees with no running contract,
+contracts expiring within 30 days, missing check-outs, manually corrected
+attendance, and a DRAFT September payrun left uncomputed so the compute step can
+be demoed live.
+
+### Backup and restore
+
+```bash
+npm run db:backup                # backups/<timestamp>.dump
+npm run db:backup -- golden      # overwrite the named demo snapshot
+npm run db:restore -- golden     # roll the database back to it (prompts first)
+npm run db:restore               # restore the newest dump
+```
+
+`backups/golden.dump` is the snapshot taken right after the bulk load. Take a
+fresh backup before the presentation, and restore it if a live demo edit goes
+wrong.
+
 ### Demo logins
 
 | Email | Password | Role | Sees |

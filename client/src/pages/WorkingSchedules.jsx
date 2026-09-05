@@ -5,7 +5,7 @@ import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { titleCase } from '../lib/format';
 import {
-  PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field,
+  PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, PagerBar,
 } from '../components/ui';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -60,6 +60,8 @@ export default function WorkingSchedules() {
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
+        <PagerBar page={list.page} pages={list.pages} total={list.total}
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <div className="o-card overflow-hidden">
@@ -92,7 +94,7 @@ export default function WorkingSchedules() {
             </table>
           )}
         <Pagination page={list.page} pages={list.pages} total={list.total}
-          onPage={(p) => list.setParam({ page: p })} />
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <p className="mt-3 text-xs text-ink-soft">

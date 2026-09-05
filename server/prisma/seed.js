@@ -7,6 +7,19 @@ const CURRENT = new Date('2026-09-05T00:00:00Z');
 const pad = (n, w = 4) => String(n).padStart(w, '0');
 const money = (n) => Number(n.toFixed(2));
 
+// Guard: this script wipes the database. Once the bulk demo data is loaded a
+// stray `npm run seed` would destroy the whole demo, so refuse unless forced.
+const employeeCount = await prisma.employee.count();
+if (employeeCount > 30 && !process.argv.includes('--force')) {
+  console.error(
+    `\nRefusing to run: the database already holds ${employeeCount} employees.\n` +
+    'This seed DELETES everything first. It looks like the bulk demo data is loaded.\n' +
+    'Use `npm run data:bulk` to top up instead, or re-run with --force to wipe anyway.\n',
+  );
+  await prisma.$disconnect();
+  process.exit(1);
+}
+
 console.log('Clearing existing data...');
 // Order matters: children before parents.
 for (const model of [

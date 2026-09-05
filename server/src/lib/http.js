@@ -19,7 +19,7 @@ export const toPatchSchema = (objectSchema) =>
 // search and sort params so the client table component can be generic.
 export const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(200).default(25),
+  limit: z.coerce.number().int().min(1).max(1000).default(25),
   search: z.string().trim().optional(),
   sortBy: z.string().optional(),
   sortDir: z.enum(['asc', 'desc']).default('desc'),

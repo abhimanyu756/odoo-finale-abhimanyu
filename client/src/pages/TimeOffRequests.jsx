@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { isHr } from '../lib/roles';
 import { date } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, SearchSelect, PagerBar, PeriodFilter } from '../components/ui';
 
 export default function TimeOffRequests() {
   const [sp] = useSearchParams();
@@ -63,10 +63,21 @@ export default function TimeOffRequests() {
             <option key={s} value={s}>{s.replace('_', ' ')}</option>
           ))}
         </select>
-        <select className="o-input w-auto" onChange={(e) => list.setParam({ timeOffTypeId: e.target.value || undefined })}>
-          <option value="">All types</option>
-          {(types ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
+        <SearchSelect
+          className="w-auto min-w-44"
+          value={list.params.timeOffTypeId ?? ''}
+          onChange={(v) => list.setParam({ timeOffTypeId: v || undefined })}
+          options={[{ value: '', label: 'All types' },
+            ...(types ?? []).map((t) => ({ value: t.id, label: t.name }))]}
+          searchPlaceholder="Search types…"
+        />
+        <PeriodFilter
+          year={list.params.year}
+          month={list.params.month}
+          onChange={(v) => list.setParam(v)}
+        />
+        <PagerBar page={list.page} pages={list.pages} total={list.total}
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <div className="o-card overflow-hidden">
@@ -115,7 +126,8 @@ export default function TimeOffRequests() {
               </table>
             </div>
           )}
-        <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
+        <Pagination page={list.page} pages={list.pages} total={list.total}
+            limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       {creating && (
@@ -171,7 +183,7 @@ function ApproveActions({ request, onDone }) {
 function RequestModal({ types, onClose, onSaved }) {
   const toast = useToast();
   const { role } = useAuth();
-  const { data: employees } = useFetch('/employees', { params: { limit: 200 }, skip: !isHr(role) });
+  const { data: employees } = useFetch('/employees', { params: { limit: 1000 }, skip: !isHr(role) });
   const [form, setForm] = useState({ timeOffTypeId: '', dateFrom: '', dateTo: '', reason: '', employeeId: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -208,17 +220,26 @@ function RequestModal({ types, onClose, onSaved }) {
       <form id="req-form" onSubmit={submit} className="grid gap-3">
         {isHr(role) && (
           <Field label="Employee" hint="Leave blank to file for yourself">
-            <select className="o-input" value={form.employeeId} onChange={set('employeeId')}>
-              <option value="">Myself</option>
-              {(employees?.rows ?? []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
+            <SearchSelect
+              value={form.employeeId}
+              onChange={(v) => setForm((f) => ({ ...f, employeeId: v }))}
+              placeholder="Myself"
+              searchPlaceholder="Search by name or email…"
+              options={[{ value: '', label: 'Myself' },
+                ...(employees?.rows ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.workEmail }))]}
+            />
           </Field>
         )}
         <Field label="Time Off Type" required>
-          <select className="o-input" value={form.timeOffTypeId} onChange={set('timeOffTypeId')} required>
-            <option value="">Select type</option>
-            {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          <SearchSelect
+            required
+            value={form.timeOffTypeId}
+            onChange={(v) => setForm((f) => ({ ...f, timeOffTypeId: v }))}
+            placeholder="Select type"
+            searchPlaceholder="Search types…"
+            options={[{ value: '', label: 'Select type' },
+              ...types.map((t) => ({ value: t.id, label: t.name }))]}
+          />
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="From" required>

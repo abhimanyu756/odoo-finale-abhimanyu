@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api, errorMessage } from '../lib/api';
 import { useFetch } from '../hooks/useApi';
 import { useToast } from '../context/ToastContext';
-import { Modal, Field } from './ui';
+import { Modal, Field, SearchSelect } from './ui';
 import { titleCase } from '../lib/format';
 
 export default function EmployeeCreateModal({ onClose, onCreated }) {
@@ -77,22 +77,34 @@ export default function EmployeeCreateModal({ onClose, onCreated }) {
           </select>
         </Field>
         <Field label="Department">
-          <select className="o-input" value={form.departmentId} onChange={set('departmentId')}>
-            <option value="">—</option>
-            {(depts ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          <SearchSelect
+            value={form.departmentId}
+            onChange={(v) => setForm((f) => ({ ...f, departmentId: v }))}
+            placeholder="—"
+            searchPlaceholder="Search departments…"
+            options={[{ value: '', label: '—' },
+              ...(depts ?? []).map((d) => ({ value: d.id, label: d.name }))]}
+          />
         </Field>
         <Field label="Job Position">
-          <select className="o-input" value={form.jobPositionId} onChange={set('jobPositionId')}>
-            <option value="">—</option>
-            {(positions ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <SearchSelect
+            value={form.jobPositionId}
+            onChange={(v) => setForm((f) => ({ ...f, jobPositionId: v }))}
+            placeholder="—"
+            searchPlaceholder="Search positions…"
+            options={[{ value: '', label: '—' },
+              ...(positions ?? []).map((p) => ({ value: p.id, label: p.name }))]}
+          />
         </Field>
         <Field label="Working Schedule">
-          <select className="o-input" value={form.workingScheduleId} onChange={set('workingScheduleId')}>
-            <option value="">—</option>
-            {(schedules?.rows ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SearchSelect
+            value={form.workingScheduleId}
+            onChange={(v) => setForm((f) => ({ ...f, workingScheduleId: v }))}
+            placeholder="—"
+            searchPlaceholder="Search schedules…"
+            options={[{ value: '', label: '—' },
+              ...(schedules?.rows ?? []).map((s) => ({ value: s.id, label: s.name }))]}
+          />
         </Field>
         <Field label="Work Location">
           <input className="o-input" value={form.workLocation} onChange={set('workLocation')} />

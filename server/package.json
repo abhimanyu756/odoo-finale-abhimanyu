@@ -10,7 +10,11 @@
     "migrate": "prisma migrate deploy",
     "migrate:dev": "prisma migrate dev",
     "generate": "prisma generate",
-    "db:reset": "prisma migrate reset --force && node prisma/seed.js"
+    "db:reset": "prisma migrate reset --force && node prisma/seed.js",
+    "data:bulk": "node scripts/bulk-data.js",
+    "data:bulk:dry": "node scripts/bulk-data.js --dry-run",
+    "db:backup": "bash scripts/db-backup.sh",
+    "db:restore": "bash scripts/db-restore.sh"
   },
   "keywords": [],
   "author": "",

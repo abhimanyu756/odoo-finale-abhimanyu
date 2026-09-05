@@ -4,13 +4,19 @@ import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { authenticate, requireMinRole, attachEmployee, isHr } from '../../middleware/auth.js';
 import { listQuerySchema, paginate, listResponse, num, toPatchSchema } from '../../lib/http.js';
-import { startOfDay, endOfDay, hoursBetween } from '../../lib/dates.js';
+import { startOfDay, endOfDay, hoursBetween, periodWindow } from '../../lib/dates.js';
 import {
   deriveMetrics,
   scheduleLineFor,
   openSessionFor,
   todayTotals,
 } from './attendance.service.js';
+
+// The coarse ?year=&month= picker every list screen shares.
+const periodFilterSchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+});
 
 const router = Router();
 router.use(authenticate);
@@ -132,11 +138,14 @@ router.get(
     const q = listQuerySchema.parse(req.query);
     const { employeeId, status, from, to, today } = req.query;
 
+    const { year, month } = periodFilterSchema.parse(req.query);
+
     const range = today === 'true'
       ? { gte: startOfDay(new Date()), lte: endOfDay(new Date()) }
       : from || to
         ? { ...(from ? { gte: startOfDay(new Date(from)) } : {}), ...(to ? { lte: endOfDay(new Date(to)) } : {}) }
-        : undefined;
+        // An explicit from/to wins; year/month is the coarse picker.
+        : periodWindow(year, month) ?? undefined;
 
     const where = {
       ...(isHr(req.user.role) ? {} : { employee: { userId: req.user.id } }),

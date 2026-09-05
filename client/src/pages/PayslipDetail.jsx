@@ -1,5 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer, Calculator, BadgeCheck, CheckCircle2, AlertTriangle } from 'lucide-react';
+import {
+  ArrowLeft, Printer, Calculator, BadgeCheck, CheckCircle2, AlertTriangle, ArrowRight,
+} from 'lucide-react';
 import { useState } from 'react';
 import { useFetch } from '../hooks/useApi';
 import { api, errorMessage, getAccessToken } from '../lib/api';
@@ -136,7 +138,16 @@ export default function PayslipDetail() {
         <div className="o-card p-4 lg:col-span-1">
           <h2 className="mb-3 text-sm font-semibold text-ink">Identification</h2>
           <div className="grid gap-3">
-            <Fact label="Employee">{slip.employee?.name}</Fact>
+            <Fact label="Employee">
+              {slip.employee?.id
+                ? (
+                  <Link to={`/employees/${slip.employee.id}`}
+                    className="font-medium text-odoo-600 hover:underline">
+                    {slip.employee.name}
+                  </Link>
+                )
+                : slip.employee?.name}
+            </Fact>
             <Fact label="Department">{slip.employee?.department?.name ?? '—'}</Fact>
             <Fact label="Job Position">{slip.employee?.jobPosition?.name ?? '—'}</Fact>
             <Fact label="Pay Run">{slip.payrun?.name}</Fact>
@@ -148,7 +159,20 @@ export default function PayslipDetail() {
             <Fact label="Worked Days">{slip.workedDays} days · {slip.workedHours} h</Fact>
             <Fact label="Leave Days">{slip.leaveDays}</Fact>
             <Fact label="Bank Account">
-              {slip.employee?.bankAccount ?? <span className="text-amber-600">Not provided</span>}
+              {slip.employee?.bankAccount ?? (
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-amber-600">Not provided</span>
+                  {isPayroll(role) && slip.employee?.id && (
+                    <Link
+                      to={`/employees/${slip.employee.id}?tab=private`}
+                      className="inline-flex items-center gap-0.5 text-xs font-medium text-odoo-600 hover:underline"
+                    >
+                      Add on employee record
+                      <ArrowRight size={11} />
+                    </Link>
+                  )}
+                </span>
+              )}
             </Fact>
             <div>
               <p className="o-label">Status</p>

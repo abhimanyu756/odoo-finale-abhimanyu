@@ -4,14 +4,14 @@ import { useList, useFetch } from '../hooks/useApi';
 import { useAuth } from '../context/AuthContext';
 import { isPayroll } from '../lib/roles';
 import { money, date } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, SearchSelect, PagerBar, PeriodFilter } from '../components/ui';
 
 export default function Payslips() {
   const [sp] = useSearchParams();
   const navigate = useNavigate();
   const { role } = useAuth();
   const list = useList('/payroll/payslips', { payrunId: sp.get('payrunId') ?? undefined });
-  const { data: employees } = useFetch('/employees', { params: { limit: 200 }, skip: !isPayroll(role) });
+  const { data: employees } = useFetch('/employees', { params: { limit: 1000 }, skip: !isPayroll(role) });
 
   return (
     <>
@@ -27,10 +27,14 @@ export default function Payslips() {
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
         {isPayroll(role) && (
-          <select className="o-input w-auto" onChange={(e) => list.setParam({ employeeId: e.target.value || undefined })}>
-            <option value="">All employees</option>
-            {(employees?.rows ?? []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
+          <SearchSelect
+            className="w-auto min-w-52"
+            value={list.params.employeeId ?? ''}
+            onChange={(v) => list.setParam({ employeeId: v || undefined })}
+            searchPlaceholder="Search by name or email…"
+            options={[{ value: '', label: 'All employees' },
+              ...(employees?.rows ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.workEmail }))]}
+          />
         )}
         <select className="o-input w-auto" onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
@@ -38,6 +42,13 @@ export default function Payslips() {
             <option key={s} value={s}>{s[0] + s.slice(1).toLowerCase()}</option>
           ))}
         </select>
+        <PeriodFilter
+          year={list.params.year}
+          month={list.params.month}
+          onChange={(v) => list.setParam(v)}
+        />
+        <PagerBar page={list.page} pages={list.pages} total={list.total}
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <div className="o-card overflow-hidden">
@@ -83,7 +94,8 @@ export default function Payslips() {
               </table>
             </div>
           )}
-        <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
+        <Pagination page={list.page} pages={list.pages} total={list.total}
+            limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
     </>
   );

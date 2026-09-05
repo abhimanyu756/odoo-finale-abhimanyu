@@ -7,14 +7,14 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { isHr } from '../lib/roles';
 import { time, hours, date, titleCase } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, SearchSelect, PagerBar, PeriodFilter } from '../components/ui';
 
 export default function Attendance() {
   const [sp] = useSearchParams();
   const { role } = useAuth();
   const employeeId = sp.get('employeeId') ?? undefined;
   const list = useList('/attendance', { employeeId });
-  const { data: employees } = useFetch('/employees', { params: { limit: 200 }, skip: !isHr(role) });
+  const { data: employees } = useFetch('/employees', { params: { limit: 1000 }, skip: !isHr(role) });
   const [editing, setEditing] = useState(null);
 
   return (
@@ -42,11 +42,14 @@ export default function Attendance() {
           {list.params.today ? 'Showing Today' : 'Today'}
         </button>
         {isHr(role) && (
-          <select className="o-input w-auto" value={list.params.employeeId ?? ''}
-            onChange={(e) => list.setParam({ employeeId: e.target.value || undefined })}>
-            <option value="">All employees</option>
-            {(employees?.rows ?? []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
+          <SearchSelect
+            className="w-auto min-w-52"
+            value={list.params.employeeId ?? ''}
+            onChange={(v) => list.setParam({ employeeId: v || undefined })}
+            searchPlaceholder="Search by name or email…"
+            options={[{ value: '', label: 'All employees' },
+              ...(employees?.rows ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.workEmail }))]}
+          />
         )}
         <select className="o-input w-auto" onChange={(e) => list.setParam({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
@@ -54,6 +57,13 @@ export default function Attendance() {
             <option key={s} value={s}>{s.replace('_', ' ')}</option>
           ))}
         </select>
+        <PeriodFilter
+          year={list.params.year}
+          month={list.params.month}
+          onChange={(v) => list.setParam(v)}
+        />
+        <PagerBar page={list.page} pages={list.pages} total={list.total}
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <div className="o-card overflow-hidden">
@@ -95,7 +105,8 @@ export default function Attendance() {
               </table>
             </div>
           )}
-        <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
+        <Pagination page={list.page} pages={list.pages} total={list.total}
+            limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       {editing && (
@@ -195,10 +206,16 @@ function AttendanceModal({ record, employees, onClose, onSaved }) {
         )}
 
         <Field label="Employee" required>
-          <select className="o-input" value={form.employeeId} onChange={set('employeeId')} required disabled={!isNew}>
-            <option value="">Select employee</option>
-            {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
+          <SearchSelect
+            required
+            disabled={!isNew}
+            value={form.employeeId}
+            onChange={(v) => setForm((f) => ({ ...f, employeeId: v }))}
+            placeholder="Select employee"
+            searchPlaceholder="Search by name or email…"
+            options={[{ value: '', label: 'Select employee' },
+              ...employees.map((e) => ({ value: e.id, label: e.name, hint: e.workEmail }))]}
+          />
         </Field>
         <Field label="Check In" required>
           <input type="datetime-local" className="o-input" value={form.checkIn} onChange={set('checkIn')} required />

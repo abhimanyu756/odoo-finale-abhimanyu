@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { isHr } from '../lib/roles';
 import { date } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, SearchSelect, PagerBar, PeriodFilter } from '../components/ui';
 
 export default function TimeOffAllocations() {
   const { role } = useAuth();
@@ -52,10 +52,21 @@ export default function TimeOffAllocations() {
           <option value="">Any status</option>
           {['DRAFT', 'APPROVED', 'REFUSED'].map((s) => <option key={s} value={s}>{s[0] + s.slice(1).toLowerCase()}</option>)}
         </select>
-        <select className="o-input w-auto" onChange={(e) => list.setParam({ timeOffTypeId: e.target.value || undefined })}>
-          <option value="">All types</option>
-          {(types ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
+        <SearchSelect
+          className="w-auto min-w-44"
+          value={list.params.timeOffTypeId ?? ''}
+          onChange={(v) => list.setParam({ timeOffTypeId: v || undefined })}
+          options={[{ value: '', label: 'All types' },
+            ...(types ?? []).map((t) => ({ value: t.id, label: t.name }))]}
+          searchPlaceholder="Search types…"
+        />
+        <PeriodFilter
+          year={list.params.year}
+          month={list.params.month}
+          onChange={(v) => list.setParam(v)}
+        />
+        <PagerBar page={list.page} pages={list.pages} total={list.total}
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <div className="o-card overflow-hidden">
@@ -109,7 +120,8 @@ export default function TimeOffAllocations() {
               </table>
             </div>
           )}
-        <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
+        <Pagination page={list.page} pages={list.pages} total={list.total}
+            limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <p className="mt-3 text-xs text-ink-soft">
@@ -135,7 +147,7 @@ export default function TimeOffAllocations() {
 
 function AllocationModal({ types, onClose, onSaved }) {
   const toast = useToast();
-  const { data: employees } = useFetch('/employees', { params: { limit: 200 } });
+  const { data: employees } = useFetch('/employees', { params: { limit: 1000 } });
   const [form, setForm] = useState({
     employeeId: '', timeOffTypeId: '', amount: '',
     validFrom: `${new Date().getFullYear()}-01-01`,
@@ -173,16 +185,26 @@ function AllocationModal({ types, onClose, onSaved }) {
       }>
       <form id="alloc-form" onSubmit={submit} className="grid gap-3">
         <Field label="Employee" required>
-          <select className="o-input" value={form.employeeId} onChange={set('employeeId')} required>
-            <option value="">Select employee</option>
-            {(employees?.rows ?? []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
+          <SearchSelect
+            required
+            value={form.employeeId}
+            onChange={(v) => setForm((f) => ({ ...f, employeeId: v }))}
+            placeholder="Select employee"
+            searchPlaceholder="Search by name or email…"
+            options={[{ value: '', label: 'Select employee' },
+              ...(employees?.rows ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.workEmail }))]}
+          />
         </Field>
         <Field label="Time Off Type" required>
-          <select className="o-input" value={form.timeOffTypeId} onChange={set('timeOffTypeId')} required>
-            <option value="">Select type</option>
-            {types.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.unit.toLowerCase()})</option>)}
-          </select>
+          <SearchSelect
+            required
+            value={form.timeOffTypeId}
+            onChange={(v) => setForm((f) => ({ ...f, timeOffTypeId: v }))}
+            placeholder="Select type"
+            searchPlaceholder="Search types…"
+            options={[{ value: '', label: 'Select type' },
+              ...types.map((t) => ({ value: t.id, label: `${t.name} (${t.unit.toLowerCase()})` }))]}
+          />
         </Field>
         <Field label="Amount" required>
           <input type="number" step="0.5" min="0.5" className="o-input" value={form.amount} onChange={set('amount')} required />

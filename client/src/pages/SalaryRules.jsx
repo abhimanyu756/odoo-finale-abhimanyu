@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { isPayrollAdmin } from '../lib/roles';
 import { money, titleCase } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Modal, Field } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Modal, Field, SearchSelect } from '../components/ui';
 
 const CATEGORY_TONES = {
   BASIC: 'bg-odoo-100 text-odoo-700',
@@ -47,11 +47,14 @@ export default function SalaryRules() {
           <input className="o-input pl-8" placeholder="Search salary rules…"
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
-        <select className="o-input w-auto" value={list.params.structureId ?? ''}
-          onChange={(e) => list.setParam({ structureId: e.target.value || undefined })}>
-          <option value="">All structures</option>
-          {(structures?.rows ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        <SearchSelect
+          className="w-auto min-w-48"
+          value={list.params.structureId ?? ''}
+          onChange={(v) => list.setParam({ structureId: v || undefined })}
+          searchPlaceholder="Search structures…"
+          options={[{ value: '', label: 'All structures' },
+            ...(structures?.rows ?? []).map((s) => ({ value: s.id, label: s.name, hint: s.code }))]}
+        />
         <select className="o-input w-auto" onChange={(e) => list.setParam({ category: e.target.value || undefined })}>
           <option value="">All categories</option>
           {(meta?.categories ?? []).map((c) => <option key={c} value={c}>{titleCase(c)}</option>)}
@@ -200,10 +203,15 @@ function RuleModal({ rule, structures, meta, onClose, onSaved }) {
           <input className="o-input" value={form.name} onChange={set('name')} required />
         </Field>
         <Field label="Salary Structure" required>
-          <select className="o-input" value={form.structureId} onChange={set('structureId')} required>
-            <option value="">Select structure</option>
-            {structures.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SearchSelect
+            required
+            value={form.structureId}
+            onChange={(v) => setForm((f) => ({ ...f, structureId: v }))}
+            placeholder="Select structure"
+            searchPlaceholder="Search structures…"
+            options={[{ value: '', label: 'Select structure' },
+              ...structures.map((s) => ({ value: s.id, label: s.name, hint: s.code }))]}
+          />
         </Field>
         <Field label="Code" required hint="Referenced by other rules as rules.CODE">
           <input className="o-input font-mono uppercase" value={form.code}

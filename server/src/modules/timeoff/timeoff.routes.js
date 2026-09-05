@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
+import { periodWindow } from '../../lib/dates.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { authenticate, requireMinRole, attachEmployee, isHr } from '../../middleware/auth.js';
 import { listQuerySchema, paginate, listResponse, num, toPatchSchema } from '../../lib/http.js';
@@ -10,6 +11,12 @@ import {
   consumeAllocation,
   overlappingRequest,
 } from './timeoff.service.js';
+
+// The coarse ?year=&month= picker every list screen shares.
+const periodFilterSchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+});
 
 const router = Router();
 router.use(authenticate);
@@ -93,12 +100,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
     const { employeeId, timeOffTypeId, status } = req.query;
+    const { year, month } = periodFilterSchema.parse(req.query);
+    // An allocation is dated by when it becomes usable.
+    const window = periodWindow(year, month);
 
     const where = {
       ...(isHr(req.user.role) ? {} : { employee: { userId: req.user.id } }),
       ...(employeeId ? { employeeId } : {}),
       ...(timeOffTypeId ? { timeOffTypeId } : {}),
       ...(status ? { status } : {}),
+      ...(window ? { validFrom: window } : {}),
       ...(q.search
         ? {
             OR: [
@@ -291,12 +302,17 @@ router.get(
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
     const { employeeId, timeOffTypeId, status } = req.query;
+    const { year, month } = periodFilterSchema.parse(req.query);
+    // A request is filed against the day it starts, so a leave spanning a month
+    // boundary belongs to the month it began in.
+    const window = periodWindow(year, month);
 
     const where = {
       ...(isHr(req.user.role) ? {} : { employee: { userId: req.user.id } }),
       ...(employeeId ? { employeeId } : {}),
       ...(timeOffTypeId ? { timeOffTypeId } : {}),
       ...(status ? { status } : {}),
+      ...(window ? { dateFrom: window } : {}),
       ...(q.search
         ? {
             OR: [

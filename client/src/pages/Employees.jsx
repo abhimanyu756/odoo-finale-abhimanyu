@@ -6,7 +6,7 @@ import { useFetch } from '../hooks/useApi';
 import { useAuth } from '../context/AuthContext';
 import { isHr } from '../lib/roles';
 import { initials, titleCase } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, SearchSelect, PagerBar } from '../components/ui';
 import EmployeeCreateModal from '../components/EmployeeCreateModal';
 
 function KanbanCard({ e }) {
@@ -86,15 +86,14 @@ export default function Employees() {
             onChange={(e) => list.setParam({ search: e.target.value || undefined })}
           />
         </div>
-        <select
-          className="o-input w-auto"
-          onChange={(e) => list.setParam({ departmentId: e.target.value || undefined })}
-        >
-          <option value="">All departments</option>
-          {(depts ?? []).map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
-          ))}
-        </select>
+        <SearchSelect
+          className="w-auto min-w-44"
+          value={list.params.departmentId ?? ''}
+          onChange={(v) => list.setParam({ departmentId: v || undefined })}
+          searchPlaceholder="Search departments…"
+          options={[{ value: '', label: 'All departments' },
+            ...(depts ?? []).map((d) => ({ value: d.id, label: d.name }))]}
+        />
         <select
           className="o-input w-auto"
           onChange={(e) => list.setParam({ employeeType: e.target.value || undefined })}
@@ -112,6 +111,8 @@ export default function Employees() {
           <option value="ACTIVE">Active</option>
           <option value="INACTIVE">Inactive</option>
         </select>
+        <PagerBar page={list.page} pages={list.pages} total={list.total}
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       {list.loading ? (
@@ -126,7 +127,8 @@ export default function Employees() {
             {list.rows.map((e) => <KanbanCard key={e.id} e={e} />)}
           </div>
           <div className="o-card mt-3">
-            <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
+            <Pagination page={list.page} pages={list.pages} total={list.total}
+            limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
           </div>
         </>
       ) : (
@@ -163,7 +165,8 @@ export default function Employees() {
               </tbody>
             </table>
           </div>
-          <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
+          <Pagination page={list.page} pages={list.pages} total={list.total}
+            limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
         </div>
       )}
 

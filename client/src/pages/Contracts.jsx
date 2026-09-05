@@ -5,7 +5,7 @@ import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { money, date } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, SearchSelect, PagerBar } from '../components/ui';
 
 const STATUSES = ['DRAFT', 'RUNNING', 'EXPIRED', 'CANCELLED'];
 
@@ -37,6 +37,8 @@ export default function Contracts() {
           <option value="">Any status</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s[0] + s.slice(1).toLowerCase()}</option>)}
         </select>
+        <PagerBar page={list.page} pages={list.pages} total={list.total}
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <div className="o-card overflow-hidden">
@@ -68,7 +70,8 @@ export default function Contracts() {
               </table>
             </div>
           )}
-        <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
+        <Pagination page={list.page} pages={list.pages} total={list.total}
+            limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       {editing && (
@@ -85,7 +88,7 @@ export default function Contracts() {
 function ContractModal({ contract, onClose, onSaved }) {
   const toast = useToast();
   const isNew = !contract.id;
-  const { data: employees } = useFetch('/employees', { params: { limit: 200 } });
+  const { data: employees } = useFetch('/employees', { params: { limit: 1000 } });
   const { data: depts } = useFetch('/org/departments');
   const { data: positions } = useFetch('/org/job-positions');
   const { data: schedules } = useFetch('/working-schedules', { params: { limit: 100 } });
@@ -139,10 +142,16 @@ function ContractModal({ contract, onClose, onSaved }) {
           <input className="o-input" value={form.name} onChange={set('name')} required />
         </Field>
         <Field label="Employee" required>
-          <select className="o-input" value={form.employeeId} onChange={set('employeeId')} required disabled={!isNew}>
-            <option value="">Select employee</option>
-            {(employees?.rows ?? []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
+          <SearchSelect
+            required
+            disabled={!isNew}
+            value={form.employeeId}
+            onChange={(v) => setForm((f) => ({ ...f, employeeId: v }))}
+            placeholder="Select employee"
+            searchPlaceholder="Search by name or email…"
+            options={[{ value: '', label: 'Select employee' },
+              ...(employees?.rows ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.workEmail }))]}
+          />
         </Field>
         <Field label="Start Date" required>
           <input type="date" className="o-input" value={form.startDate} onChange={set('startDate')} required />
@@ -159,28 +168,44 @@ function ContractModal({ contract, onClose, onSaved }) {
           </select>
         </Field>
         <Field label="Department">
-          <select className="o-input" value={form.departmentId ?? ''} onChange={set('departmentId')}>
-            <option value="">—</option>
-            {(depts ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          <SearchSelect
+            value={form.departmentId ?? ''}
+            onChange={(v) => setForm((f) => ({ ...f, departmentId: v }))}
+            placeholder="—"
+            searchPlaceholder="Search departments…"
+            options={[{ value: '', label: '—' },
+              ...(depts ?? []).map((d) => ({ value: d.id, label: d.name }))]}
+          />
         </Field>
         <Field label="Job Position">
-          <select className="o-input" value={form.jobPositionId ?? ''} onChange={set('jobPositionId')}>
-            <option value="">—</option>
-            {(positions ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <SearchSelect
+            value={form.jobPositionId ?? ''}
+            onChange={(v) => setForm((f) => ({ ...f, jobPositionId: v }))}
+            placeholder="—"
+            searchPlaceholder="Search positions…"
+            options={[{ value: '', label: '—' },
+              ...(positions ?? []).map((p) => ({ value: p.id, label: p.name }))]}
+          />
         </Field>
         <Field label="Working Schedule">
-          <select className="o-input" value={form.workingScheduleId ?? ''} onChange={set('workingScheduleId')}>
-            <option value="">—</option>
-            {(schedules?.rows ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SearchSelect
+            value={form.workingScheduleId ?? ''}
+            onChange={(v) => setForm((f) => ({ ...f, workingScheduleId: v }))}
+            placeholder="—"
+            searchPlaceholder="Search schedules…"
+            options={[{ value: '', label: '—' },
+              ...(schedules?.rows ?? []).map((s) => ({ value: s.id, label: s.name }))]}
+          />
         </Field>
         <Field label="Salary Structure">
-          <select className="o-input" value={form.salaryStructureId ?? ''} onChange={set('salaryStructureId')}>
-            <option value="">—</option>
-            {(structures?.rows ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SearchSelect
+            value={form.salaryStructureId ?? ''}
+            onChange={(v) => setForm((f) => ({ ...f, salaryStructureId: v }))}
+            placeholder="—"
+            searchPlaceholder="Search structures…"
+            options={[{ value: '', label: '—' },
+              ...(structures?.rows ?? []).map((s) => ({ value: s.id, label: s.name, hint: s.code }))]}
+          />
         </Field>
         <div className="sm:col-span-2">
           <Field label="Notes">

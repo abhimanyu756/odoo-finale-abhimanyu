@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { isHr, isAdmin } from '../lib/roles';
 import { initials, titleCase, date } from '../lib/format';
-import { PageHeader, Spinner, ErrorState, StatusBadge, SmartButton, Field, Modal } from '../components/ui';
+import { PageHeader, Spinner, ErrorState, StatusBadge, SmartButton, Field, Modal, SearchSelect } from '../components/ui';
 
 const TABS = ['Work Information', 'Private Information'];
 
@@ -34,9 +34,13 @@ export default function EmployeeForm() {
   const { data: depts } = useFetch('/org/departments');
   const { data: positions } = useFetch('/org/job-positions');
   const { data: schedules } = useFetch('/working-schedules', { params: { limit: 100 } });
-  const { data: managers } = useFetch('/employees', { params: { limit: 200 } });
+  const { data: managers } = useFetch('/employees', { params: { limit: 1000 } });
 
-  const [tab, setTab] = useState(TABS[0]);
+  // ?tab=private lands straight on the Private Information tab, so a link from
+  // a payroll warning ("no bank account on file") opens the field it means.
+  const [tab, setTab] = useState(
+    new URLSearchParams(window.location.search).get('tab') === 'private' ? TABS[1] : TABS[0],
+  );
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
@@ -206,30 +210,46 @@ export default function EmployeeForm() {
                 <Field label="Last Name"><input className="o-input" value={form.lastName} onChange={set('lastName')} /></Field>
                 <Field label="Work Email"><input className="o-input" value={form.workEmail} onChange={set('workEmail')} /></Field>
                 <Field label="Department">
-                  <select className="o-input" value={form.departmentId} onChange={set('departmentId')}>
-                    <option value="">—</option>
-                    {(depts ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
+                  <SearchSelect
+                    value={form.departmentId}
+                    onChange={(v) => setForm((f) => ({ ...f, departmentId: v }))}
+                    placeholder="—"
+                    searchPlaceholder="Search departments…"
+                    options={[{ value: '', label: '—' },
+                      ...(depts ?? []).map((d) => ({ value: d.id, label: d.name }))]}
+                  />
                 </Field>
                 <Field label="Job Position">
-                  <select className="o-input" value={form.jobPositionId} onChange={set('jobPositionId')}>
-                    <option value="">—</option>
-                    {(positions ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+                  <SearchSelect
+                    value={form.jobPositionId}
+                    onChange={(v) => setForm((f) => ({ ...f, jobPositionId: v }))}
+                    placeholder="—"
+                    searchPlaceholder="Search positions…"
+                    options={[{ value: '', label: '—' },
+                      ...(positions ?? []).map((p) => ({ value: p.id, label: p.name }))]}
+                  />
                 </Field>
                 <Field label="Manager">
-                  <select className="o-input" value={form.managerId} onChange={set('managerId')}>
-                    <option value="">—</option>
-                    {(managers?.rows ?? []).filter((m) => m.id !== id).map((m) => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                  </select>
+                  <SearchSelect
+                    value={form.managerId}
+                    onChange={(v) => setForm((f) => ({ ...f, managerId: v }))}
+                    placeholder="—"
+                    searchPlaceholder="Search by name or email…"
+                    options={[{ value: '', label: '—' },
+                      ...(managers?.rows ?? [])
+                        .filter((m) => m.id !== id)
+                        .map((m) => ({ value: m.id, label: m.name, hint: m.workEmail }))]}
+                  />
                 </Field>
                 <Field label="Working Schedule">
-                  <select className="o-input" value={form.workingScheduleId} onChange={set('workingScheduleId')}>
-                    <option value="">—</option>
-                    {(schedules?.rows ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
+                  <SearchSelect
+                    value={form.workingScheduleId}
+                    onChange={(v) => setForm((f) => ({ ...f, workingScheduleId: v }))}
+                    placeholder="—"
+                    searchPlaceholder="Search schedules…"
+                    options={[{ value: '', label: '—' },
+                      ...(schedules?.rows ?? []).map((s) => ({ value: s.id, label: s.name }))]}
+                  />
                 </Field>
                 <Field label="Work Location"><input className="o-input" value={form.workLocation} onChange={set('workLocation')} /></Field>
                 <Field label="Employee Type">

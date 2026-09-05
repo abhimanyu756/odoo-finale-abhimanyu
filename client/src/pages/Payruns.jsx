@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Wallet, ArrowRight, Search } from 'lucide-react';
+import { Plus, Wallet, ArrowRight, Search, AlertTriangle } from 'lucide-react';
 import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { money, date, compactMoney } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, SearchSelect, PagerBar, PeriodFilter } from '../components/ui';
 
 export default function Payruns() {
   const navigate = useNavigate();
   const list = useList('/payroll/payruns');
+  const { data: structures } = useFetch('/salary/structures', { params: { limit: 1000 } });
   const [wizard, setWizard] = useState(false);
 
   return (
@@ -30,6 +31,21 @@ export default function Payruns() {
           <input className="o-input pl-8" placeholder="Search payruns…"
             onChange={(e) => list.setParam({ search: e.target.value || undefined })} />
         </div>
+        <PeriodFilter
+          year={list.params.year}
+          month={list.params.month}
+          onChange={(v) => list.setParam(v)}
+        />
+        <SearchSelect
+          className="w-auto min-w-40"
+          value={list.params.structureId ?? ''}
+          onChange={(v) => list.setParam({ structureId: v || undefined })}
+          searchPlaceholder="Search structures…"
+          options={[{ value: '', label: 'All structures' },
+            ...(structures?.rows ?? []).map((x) => ({ value: x.id, label: x.name, hint: x.code }))]}
+        />
+        <PagerBar page={list.page} pages={list.pages} total={list.total}
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <div className="o-card overflow-hidden">
@@ -43,7 +59,7 @@ export default function Payruns() {
                   <tr>
                     <th>Payrun</th><th>Structure</th><th>Period</th>
                     <th className="text-right">Payslips</th><th className="text-right">Gross</th>
-                    <th className="text-right">Net</th><th>Status</th>
+                    <th className="text-right">Net</th><th>Status</th><th>Warnings</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -56,13 +72,31 @@ export default function Payruns() {
                       <td className="text-right tabular-nums">{money(p.totals?.gross)}</td>
                       <td className="text-right font-medium tabular-nums">{money(p.totals?.net)}</td>
                       <td><StatusBadge value={p.status} /></td>
+                      <td>
+                        {/* Accumulated across the run's payslips, as in the
+                            mockup: the row says whether it needs attention
+                            before you open it. */}
+                        {p.warningCount > 0
+                          ? (
+                            <span className={`o-badge ${p.errorCount > 0
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-amber-100 text-amber-700'}`}>
+                              <AlertTriangle size={11} />
+                              {p.errorCount > 0
+                                ? `${p.errorCount} blocking`
+                                : `${p.warningCount} warning${p.warningCount === 1 ? '' : 's'}`}
+                            </span>
+                          )
+                          : <span className="text-xs text-ink-soft">No warnings</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-        <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
+        <Pagination page={list.page} pages={list.pages} total={list.total}
+            limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       {wizard && <PayrunWizard onClose={() => setWizard(false)} onCreated={(id) => navigate(`/payroll/payruns/${id}`)} />}
@@ -217,16 +251,25 @@ function PayrunWizard({ onClose, onCreated }) {
             </Field>
           </div>
           <Field label="Salary Structure" required>
-            <select className="o-input" value={scope.structureId} onChange={set('structureId')} required>
-              <option value="">Select structure</option>
-              {(structures?.rows ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <SearchSelect
+              required
+              value={scope.structureId}
+              onChange={(v) => setScope((s) => ({ ...s, structureId: v }))}
+              placeholder="Select structure"
+              searchPlaceholder="Search structures…"
+              options={[{ value: '', label: 'Select structure' },
+                ...(structures?.rows ?? []).map((s) => ({ value: s.id, label: s.name, hint: s.code }))]}
+            />
           </Field>
           <Field label="Department" hint="Optional filter">
-            <select className="o-input" value={scope.departmentId} onChange={set('departmentId')}>
-              <option value="">All departments</option>
-              {(depts ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+            <SearchSelect
+              value={scope.departmentId}
+              onChange={(v) => setScope((s) => ({ ...s, departmentId: v }))}
+              placeholder="All departments"
+              searchPlaceholder="Search departments…"
+              options={[{ value: '', label: 'All departments' },
+                ...(depts ?? []).map((d) => ({ value: d.id, label: d.name }))]}
+            />
           </Field>
           <Field label="Period" required hint="Sets the first and last day of the month">
             <select className="o-input" value={customPeriod ? '' : period}

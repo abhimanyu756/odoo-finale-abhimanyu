@@ -42,3 +42,14 @@ export const parseHHMM = (s) => {
   const [h, m] = String(s).split(':').map(Number);
   return h + (m || 0) / 60;
 };
+
+// Half-open UTC window for a year, or a month within it. Returned as a Prisma
+// range filter so every list can accept the same ?year=&month= pair.
+// Half-open (`lt`) rather than `lte` so a record stamped at the final
+// millisecond of the month cannot fall between two adjacent windows.
+export const periodWindow = (year, month) => {
+  if (!year) return null;
+  return month
+    ? { gte: new Date(Date.UTC(year, month - 1, 1)), lt: new Date(Date.UTC(year, month, 1)) }
+    : { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) };
+};

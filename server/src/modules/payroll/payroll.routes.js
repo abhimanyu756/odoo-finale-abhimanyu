@@ -5,6 +5,7 @@ import { asyncHandler, badRequest, forbidden, notFound } from '../../lib/errors.
 import { authenticate, requireMinRole, isPayroll } from '../../middleware/auth.js';
 import { listQuerySchema, paginate, listResponse, num } from '../../lib/http.js';
 import { contractForPeriod } from '../contracts/contracts.service.js';
+import { periodWindow } from '../../lib/dates.js';
 import { renderPayslipPdf } from './payslip.pdf.js';
 import { sendMail, mailEnabled } from '../../lib/mailer.js';
 import {
@@ -18,6 +19,11 @@ import {
 
 const router = Router();
 router.use(authenticate);
+
+const payrunFilterSchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+});
 
 const canRead = requireMinRole('HR_PAYROLL_USER');
 const canWrite = requireMinRole('HR_PAYROLL_USER');
@@ -49,8 +55,18 @@ const slipShape = (s) => ({
     ? WARNING_LABELS[s.warnings[0].code] ?? 'Attention'
     : null,
   warningSeverity: s.warnings?.some((w) => w.severity === 'ERROR') ? 'ERROR' : (s.warnings?.length ? 'WARNING' : null),
+  // Rebuilt rather than spread so `name` is composed once, but every other
+  // selected field must be carried through: dropping bankAccount here made the
+  // payslip page report "Not provided" for employees who do have one.
   employee: s.employee
-    ? { id: s.employee.id, name: `${s.employee.firstName} ${s.employee.lastName}`, workEmail: s.employee.workEmail }
+    ? {
+        id: s.employee.id,
+        name: `${s.employee.firstName} ${s.employee.lastName}`,
+        workEmail: s.employee.workEmail,
+        bankAccount: s.employee.bankAccount,
+        department: s.employee.department,
+        jobPosition: s.employee.jobPosition,
+      }
     : undefined,
 });
 
@@ -58,6 +74,12 @@ const runShape = (p) => ({
   ...p,
   payslips: p.payslips?.map(slipShape),
   payslipCount: p._count?.payslips ?? p.payslips?.length,
+  // Accumulated tally for the list's Warnings column. Errors are counted
+  // separately because they block validation while advisories do not.
+  // Left undefined when the relation was not loaded, so a caller can tell
+  // "no warnings" apart from "not asked for".
+  warningCount: p.warnings ? p.warnings.length : undefined,
+  errorCount: p.warnings ? p.warnings.filter((w) => w.severity === 'ERROR').length : undefined,
   totals: p.payslips
     ? {
         gross: Number(p.payslips.reduce((s, x) => s + Number(x.gross), 0).toFixed(2)),
@@ -95,10 +117,17 @@ router.get(
   canRead,
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
-    const { status } = req.query;
+    const { status, structureId } = req.query;
+    const f = payrunFilterSchema.parse(req.query);
+
+    // Year and month narrow on periodStart, which is what "the March payrun"
+    // means - a run is named for the period it pays, not when it was created.
+    const window = periodWindow(f.year, f.month);
 
     const where = {
       ...(status ? { status } : {}),
+      ...(structureId ? { structureId } : {}),
+      ...(window ? { periodStart: window } : {}),
       ...(q.search ? { name: { contains: q.search, mode: 'insensitive' } } : {}),
     };
 
@@ -111,12 +140,17 @@ router.get(
           structure: { select: { id: true, name: true } },
           _count: { select: { payslips: true } },
           payslips: { select: { gross: true, deduction: true, net: true } },
+          warnings: { select: { severity: true } },
         },
       }),
       prisma.payrun.count({ where }),
     ]);
 
-    res.json(listResponse(rows.map((r) => ({ ...runShape(r), payslips: undefined })), total, q));
+    res.json(listResponse(
+      rows.map((r) => ({ ...runShape(r), payslips: undefined, warnings: undefined })),
+      total,
+      q,
+    ));
   }),
 );
 
@@ -130,7 +164,12 @@ router.get(
         structure: { select: { id: true, name: true, code: true } },
         warnings: { orderBy: { severity: 'asc' } },
         payslips: {
-          include: { employee: { select: { id: true, firstName: true, lastName: true, workEmail: true } } },
+          include: {
+            employee: { select: { id: true, firstName: true, lastName: true, workEmail: true } },
+            // Drives the per-row Warning column, so an issue is visible against
+            // the payslip it belongs to and not only in the summary banner.
+            warnings: { select: { id: true, code: true, message: true, severity: true } },
+          },
           orderBy: { number: 'asc' },
         },
       },
@@ -213,6 +252,151 @@ router.post(
 );
 
 // ------------------------------------------------------------ Workflow ----
+// Renaming is always allowed; the period and structure define what the payslips
+// were computed from, so they can only move while the run is still DRAFT.
+const updatePayrunSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    structureId: z.string().uuid().optional(),
+    periodStart: z.coerce.date().optional(),
+    periodEnd: z.coerce.date().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' });
+
+router.patch(
+  '/payruns/:id',
+  canWrite,
+  asyncHandler(async (req, res) => {
+    const body = updatePayrunSchema.parse(req.body);
+    const payrun = await prisma.payrun.findUnique({ where: { id: req.params.id } });
+    if (!payrun) throw notFound('Payrun not found');
+
+    const structural = ['structureId', 'periodStart', 'periodEnd'].filter((k) => k in body);
+    if (structural.length && payrun.status !== 'DRAFT') {
+      throw badRequest(
+        `This payrun is ${payrun.status.toLowerCase()}; only its name can be changed. `
+        + 'Reset it to draft by recomputing, or create a new run.',
+      );
+    }
+
+    const periodStart = body.periodStart ?? payrun.periodStart;
+    const periodEnd = body.periodEnd ?? payrun.periodEnd;
+    if (periodEnd < periodStart) throw badRequest('Period end must be after period start');
+
+    await prisma.payrun.update({
+      where: { id: payrun.id },
+      data: { ...body, periodStart, periodEnd },
+    });
+
+    // A moved period changes every payslip's window, so the stored figures are
+    // stale until recompute; say so rather than leaving a silent mismatch.
+    if (structural.length) {
+      await prisma.payslip.updateMany({
+        where: { payrunId: payrun.id },
+        data: { periodStart, periodEnd },
+      });
+    }
+
+    const full = await prisma.payrun.findUnique({
+      where: { id: payrun.id },
+      include: {
+        structure: { select: { id: true, name: true, code: true } },
+        warnings: { orderBy: { severity: 'asc' } },
+        payslips: {
+          include: {
+            employee: { select: { id: true, firstName: true, lastName: true, workEmail: true } },
+            warnings: { select: { id: true, code: true, message: true, severity: true } },
+          },
+          orderBy: { number: 'asc' },
+        },
+      },
+    });
+    res.json({ ...runShape(full), needsRecompute: structural.length > 0 });
+  }),
+);
+
+// Adds employees to an existing run. Together with removing a payslip this
+// makes the roster editable, so forgetting someone does not mean deleting the
+// payrun and rebuilding it.
+const addPayslipsSchema = z.object({
+  employeeIds: z.array(z.string().uuid()).min(1, 'Select at least one employee'),
+});
+
+router.post(
+  '/payruns/:id/payslips',
+  canWrite,
+  asyncHandler(async (req, res) => {
+    const { employeeIds } = addPayslipsSchema.parse(req.body);
+    const payrun = await prisma.payrun.findUnique({ where: { id: req.params.id } });
+    if (!payrun) throw notFound('Payrun not found');
+    if (!['DRAFT', 'COMPUTED'].includes(payrun.status)) {
+      throw badRequest(
+        `This payrun is ${payrun.status.toLowerCase()}; its roster can no longer be changed`,
+      );
+    }
+
+    const added = [];
+    const skipped = [];
+    await prisma.$transaction(async (tx) => {
+      const already = new Set(
+        (await tx.payslip.findMany({
+          where: { payrunId: payrun.id }, select: { employeeId: true },
+        })).map((p) => p.employeeId),
+      );
+
+      for (const employeeId of employeeIds) {
+        if (already.has(employeeId)) {
+          skipped.push({ employeeId, reason: 'Already in this payrun' });
+          continue;
+        }
+        const contract = await contractForPeriod(employeeId, payrun.periodStart, payrun.periodEnd, tx);
+        if (!contract) {
+          skipped.push({ employeeId, reason: 'No contract covers this period' });
+          continue;
+        }
+        await tx.payslip.create({
+          data: {
+            number: await nextPayslipNumber(payrun.periodStart, tx),
+            payrunId: payrun.id,
+            employeeId,
+            contractId: contract.id,
+            periodStart: payrun.periodStart,
+            periodEnd: payrun.periodEnd,
+          },
+        });
+        added.push(employeeId);
+      }
+    });
+
+    // New payslips arrive as DRAFT, so the run drops back to DRAFT rather than
+    // claiming to be computed while some of its rows hold no figures.
+    if (added.length && payrun.status === 'COMPUTED') {
+      await prisma.payrun.update({
+        where: { id: payrun.id }, data: { status: 'DRAFT', computedAt: null },
+      });
+    }
+
+    const fresh = await prisma.payrun.findUnique({ where: { id: payrun.id } });
+    await persistWarnings(fresh.id, await collectWarnings(fresh));
+
+    const full = await prisma.payrun.findUnique({
+      where: { id: payrun.id },
+      include: {
+        structure: { select: { id: true, name: true, code: true } },
+        warnings: { orderBy: { severity: 'asc' } },
+        payslips: {
+          include: {
+            employee: { select: { id: true, firstName: true, lastName: true, workEmail: true } },
+            warnings: { select: { id: true, code: true, message: true, severity: true } },
+          },
+          orderBy: { number: 'asc' },
+        },
+      },
+    });
+    res.json({ added: added.length, skipped, payrun: runShape(full) });
+  }),
+);
+
 router.post(
   '/payruns/:id/compute',
   canWrite,
@@ -260,7 +444,9 @@ router.post(
       });
     });
 
-    res.json({ ...runShape(updated), warnings });
+    // Fold the freshly collected warnings in before shaping, so the counts on
+    // the response match the list they are derived from.
+    res.json(runShape({ ...updated, warnings }));
   }),
 );
 
@@ -297,12 +483,68 @@ router.delete(
   }),
 );
 
+// Removes one payslip from a run. This is the fix for a roster mistake - an
+// employee who should not have been included, or a duplicate that blocks
+// validation - so the whole payrun does not have to be deleted and rebuilt.
+//
+// Only before validation: once a run is validated or paid its payslips are
+// financial records, and the way to retract one of those is to cancel the run.
+router.delete(
+  '/payslips/:id',
+  canFinalise,
+  asyncHandler(async (req, res) => {
+    const slip = await prisma.payslip.findUnique({
+      where: { id: req.params.id },
+      include: { payrun: true, employee: { select: { firstName: true, lastName: true } } },
+    });
+    if (!slip) throw notFound('Payslip not found');
+
+    if (['VALIDATED', 'PAID'].includes(slip.payrun.status)) {
+      throw badRequest(
+        `This payrun is ${slip.payrun.status.toLowerCase()}; its payslips can no longer be removed`,
+      );
+    }
+    if (['VALIDATED', 'PAID'].includes(slip.status)) {
+      throw badRequest('A validated or paid payslip cannot be removed');
+    }
+
+    // Lines and this payslip's own warnings cascade away with it; the run-level
+    // warnings are then recollected so a cleared DUPLICATE_PAYSLIP stops
+    // blocking validation straight away.
+    await prisma.payslip.delete({ where: { id: slip.id } });
+
+    const payrun = await prisma.payrun.findUnique({ where: { id: slip.payrunId } });
+    await persistWarnings(payrun.id, await collectWarnings(payrun));
+
+    const full = await prisma.payrun.findUnique({
+      where: { id: payrun.id },
+      include: {
+        structure: { select: { id: true, name: true, code: true } },
+        warnings: { orderBy: { severity: 'asc' } },
+        payslips: {
+          include: {
+            employee: { select: { id: true, firstName: true, lastName: true, workEmail: true } },
+            warnings: { select: { id: true, code: true, message: true, severity: true } },
+          },
+          orderBy: { number: 'asc' },
+        },
+      },
+    });
+    res.json({
+      removed: `${slip.employee.firstName} ${slip.employee.lastName}`,
+      payrun: runShape(full),
+    });
+  }),
+);
+
 // ------------------------------------------------------------ Payslips ----
 router.get(
   '/payslips',
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
     const { payrunId, employeeId, status } = req.query;
+    const f = payrunFilterSchema.parse(req.query);
+    const window = periodWindow(f.year, f.month);
 
     const where = {
       // Employees may read their own payslips; payroll roles see everything.
@@ -310,6 +552,7 @@ router.get(
       ...(payrunId ? { payrunId } : {}),
       ...(employeeId ? { employeeId } : {}),
       ...(status ? { status } : {}),
+      ...(window ? { periodStart: window } : {}),
       ...(q.search ? { number: { contains: q.search, mode: 'insensitive' } } : {}),
     };
 

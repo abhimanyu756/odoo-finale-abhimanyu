@@ -8,7 +8,7 @@ import { ROLE_LABELS, ROLES } from '../lib/roles';
 import { initials, dateTime } from '../lib/format';
 import {
   PageHeader, Spinner, EmptyState, ErrorState, StatusBadge,
-  Pagination, Modal, Field, PasswordInput,
+  Pagination, Modal, Field, PasswordInput, SearchSelect, PagerBar,
 } from '../components/ui';
 
 // User accounts are separate from Employee records but linked to one for access
@@ -58,6 +58,8 @@ export default function Users() {
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
+        <PagerBar page={list.page} pages={list.pages} total={list.total}
+          limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <div className="o-card overflow-hidden">
@@ -97,7 +99,8 @@ export default function Users() {
               </table>
             </div>
           )}
-        <Pagination page={list.page} pages={list.pages} total={list.total} onPage={(p) => list.setParam({ page: p })} />
+        <Pagination page={list.page} pages={list.pages} total={list.total}
+            limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>
 
       <p className="mt-3 text-xs text-ink-soft">
@@ -187,13 +190,15 @@ function CreateUserModal({ onClose, onSaved }) {
         <form id="user-create" onSubmit={submit} className="grid gap-3">
           <Field label="Employee" required
             hint="Only employees without an existing login are listed.">
-            <select className="o-input" value={form.employeeId}
-              onChange={(e) => pickEmployee(e.target.value)} required>
-              <option value="">Select employee</option>
-              {(assignable ?? []).map((e) => (
-                <option key={e.id} value={e.id}>{e.name} — {e.workEmail}</option>
-              ))}
-            </select>
+            <SearchSelect
+              required
+              value={form.employeeId}
+              onChange={pickEmployee}
+              placeholder="Select employee"
+              searchPlaceholder="Search by name or email…"
+              options={[{ value: '', label: 'Select employee' },
+                ...(assignable ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.workEmail }))]}
+            />
           </Field>
 
           {assignable?.length === 0 && (
