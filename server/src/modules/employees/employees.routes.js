@@ -5,6 +5,7 @@ import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../../lib/errors.js';
 import { authenticate, requireMinRole, isHr } from '../../middleware/auth.js';
 import { listQuerySchema, paginate, listResponse, toPatchSchema } from '../../lib/http.js';
+import { sendCsv, EXPORT_LIMIT } from '../../lib/csv.js';
 
 const router = Router();
 router.use(authenticate);
@@ -37,45 +38,51 @@ const scopeFor = (req) => {
   return { userId: req.user.id };
 };
 
+// Shared by the list and its CSV export so the file matches the screen.
+const employeeWhereFor = async (req) => {
+  const q = listQuerySchema.parse(req.query);
+  const { departmentId, status, employeeType, scope } = req.query;
+
+  // "My Team": the requester's own direct reports.
+  //
+  // This deliberately replaces the default scope rather than narrowing it. A
+  // line manager is usually a plain EMPLOYEE, and the default restricts them
+  // to their own record - intersecting the two would return nobody, which is
+  // exactly the case this view exists to serve. Widening is safe because the
+  // filter can only ever match people who report to the requester.
+  //
+  // A user with no employee record manages nobody, so it must match nothing
+  // rather than fall through to everyone.
+  let teamFilter;
+  if (scope === 'team') {
+    const me = await prisma.employee.findFirst({
+      where: { userId: req.user.id }, select: { id: true },
+    });
+    teamFilter = { managerId: me?.id ?? '__none__' };
+  }
+
+  return {
+    ...(teamFilter ?? scopeFor(req)),
+    ...(departmentId ? { departmentId } : {}),
+    ...(status ? { status } : {}),
+    ...(employeeType ? { employeeType } : {}),
+    ...(q.search
+      ? {
+          OR: [
+            { firstName: { contains: q.search, mode: 'insensitive' } },
+            { lastName: { contains: q.search, mode: 'insensitive' } },
+            { workEmail: { contains: q.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  };
+};
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
-    const { departmentId, status, employeeType, scope } = req.query;
-
-    // "My Team": the requester's own direct reports.
-    //
-    // This deliberately replaces the default scope rather than narrowing it. A
-    // line manager is usually a plain EMPLOYEE, and the default restricts them
-    // to their own record - intersecting the two would return nobody, which is
-    // exactly the case this view exists to serve. Widening is safe because the
-    // filter can only ever match people who report to the requester.
-    //
-    // A user with no employee record manages nobody, so it must match nothing
-    // rather than fall through to everyone.
-    let teamFilter;
-    if (scope === 'team') {
-      const me = await prisma.employee.findFirst({
-        where: { userId: req.user.id }, select: { id: true },
-      });
-      teamFilter = { managerId: me?.id ?? '__none__' };
-    }
-
-    const where = {
-      ...(teamFilter ?? scopeFor(req)),
-      ...(departmentId ? { departmentId } : {}),
-      ...(status ? { status } : {}),
-      ...(employeeType ? { employeeType } : {}),
-      ...(q.search
-        ? {
-            OR: [
-              { firstName: { contains: q.search, mode: 'insensitive' } },
-              { lastName: { contains: q.search, mode: 'insensitive' } },
-              { workEmail: { contains: q.search, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
-    };
+    const where = await employeeWhereFor(req);
 
     const [rows, total] = await Promise.all([
       prisma.employee.findMany({
@@ -88,6 +95,38 @@ router.get(
     ]);
 
     res.json(listResponse(rows.map(shape), total, q));
+  }),
+);
+
+const EMPLOYEE_CSV = [
+  { header: 'Employee', value: (r) => `${r.firstName} ${r.lastName}` },
+  { header: 'Work Email', value: (r) => r.workEmail },
+  { header: 'Phone', value: (r) => r.phone },
+  { header: 'Department', value: (r) => r.department?.name },
+  { header: 'Job Position', value: (r) => r.jobPosition?.name },
+  { header: 'Manager', value: (r) => (r.manager ? `${r.manager.firstName} ${r.manager.lastName}` : '') },
+  { header: 'HR Responsible', value: (r) => (r.hrResponsible ? `${r.hrResponsible.firstName} ${r.hrResponsible.lastName}` : '') },
+  { header: 'Employee Type', value: (r) => r.employeeType },
+  { header: 'Status', value: (r) => r.status },
+  { header: 'Work Location', value: (r) => r.workLocation },
+  { header: 'Working Schedule', value: (r) => r.workingSchedule?.name },
+  { header: 'Hire Date', value: (r) => r.hireDate },
+  { header: 'Login', value: (r) => r.user?.email },
+  { header: 'Role', value: (r) => r.user?.role },
+];
+
+// CSV of the employees currently on screen - same filters, no pagination.
+// Bank details are deliberately absent: this is a directory, not a payment file.
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    const rows = await prisma.employee.findMany({
+      where: await employeeWhereFor(req),
+      orderBy: { firstName: 'asc' },
+      take: EXPORT_LIMIT,
+      include: RELATIONS,
+    });
+    sendCsv(res, 'employees', EMPLOYEE_CSV, rows);
   }),
 );
 

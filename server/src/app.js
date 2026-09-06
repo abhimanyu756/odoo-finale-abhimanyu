@@ -4,6 +4,9 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { env } from './config/env.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
+import { auditContext } from './lib/audit.js';
+import auditRoutes from './modules/audit/audit.routes.js';
+import assistantRoutes from './modules/assistant/assistant.routes.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import orgRoutes from './modules/org/org.routes.js';
 import employeeRoutes from './modules/employees/employees.routes.js';
@@ -23,6 +26,8 @@ export function createApp() {
   app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser());
   if (env.nodeEnv === 'development') app.use(morgan('dev'));
+  // Seeds the audit actor for every request; a no-op for unauthenticated ones.
+  app.use(auditContext);
 
   app.get('/api/health', (_req, res) =>
     res.json({ ok: true, service: 'peoplepay360', time: new Date().toISOString() }),
@@ -39,6 +44,8 @@ export function createApp() {
   app.use('/api/payroll', payrollRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/users', userRoutes);
+  app.use('/api/audit', auditRoutes);
+  app.use('/api/assistant', assistantRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

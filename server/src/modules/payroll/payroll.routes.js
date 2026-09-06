@@ -6,6 +6,7 @@ import { authenticate, requireMinRole, isPayroll } from '../../middleware/auth.j
 import { listQuerySchema, paginate, listResponse, num } from '../../lib/http.js';
 import { contractForPeriod } from '../contracts/contracts.service.js';
 import { periodWindow } from '../../lib/dates.js';
+import { sendCsv, EXPORT_LIMIT } from '../../lib/csv.js';
 import { renderPayslipPdf } from './payslip.pdf.js';
 import { sendMail, mailEnabled } from '../../lib/mailer.js';
 import {
@@ -28,6 +29,39 @@ const payrunFilterSchema = z.object({
 const canRead = requireMinRole('HR_PAYROLL_USER');
 const canWrite = requireMinRole('HR_PAYROLL_USER');
 const canFinalise = requireMinRole('HR_PAYROLL_ADMIN');
+
+// The list and its CSV export must filter identically, so each where clause is
+// built once and shared. Export drops only the pagination.
+const payrunWhereFor = (req) => {
+  const q = listQuerySchema.parse(req.query);
+  const { status, structureId } = req.query;
+  const f = payrunFilterSchema.parse(req.query);
+  // Year and month narrow on periodStart, which is what "the March payrun"
+  // means - a run is named for the period it pays, not when it was created.
+  const window = periodWindow(f.year, f.month);
+  return {
+    ...(status ? { status } : {}),
+    ...(structureId ? { structureId } : {}),
+    ...(window ? { periodStart: window } : {}),
+    ...(q.search ? { name: { contains: q.search, mode: 'insensitive' } } : {}),
+  };
+};
+
+const payslipWhereFor = (req) => {
+  const q = listQuerySchema.parse(req.query);
+  const { payrunId, employeeId, status } = req.query;
+  const f = payrunFilterSchema.parse(req.query);
+  const window = periodWindow(f.year, f.month);
+  return {
+    // Employees may read their own payslips; payroll roles see everything.
+    ...(isPayroll(req.user.role) ? {} : { employee: { userId: req.user.id } }),
+    ...(payrunId ? { payrunId } : {}),
+    ...(employeeId ? { employeeId } : {}),
+    ...(status ? { status } : {}),
+    ...(window ? { periodStart: window } : {}),
+    ...(q.search ? { number: { contains: q.search, mode: 'insensitive' } } : {}),
+  };
+};
 
 // Compact labels matching the mockup's Warning column ("A/C missing", "Duplicate").
 const WARNING_LABELS = {
@@ -117,19 +151,7 @@ router.get(
   canRead,
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
-    const { status, structureId } = req.query;
-    const f = payrunFilterSchema.parse(req.query);
-
-    // Year and month narrow on periodStart, which is what "the March payrun"
-    // means - a run is named for the period it pays, not when it was created.
-    const window = periodWindow(f.year, f.month);
-
-    const where = {
-      ...(status ? { status } : {}),
-      ...(structureId ? { structureId } : {}),
-      ...(window ? { periodStart: window } : {}),
-      ...(q.search ? { name: { contains: q.search, mode: 'insensitive' } } : {}),
-    };
+    const where = payrunWhereFor(req);
 
     const [rows, total] = await Promise.all([
       prisma.payrun.findMany({
@@ -151,6 +173,25 @@ router.get(
       total,
       q,
     ));
+  }),
+);
+
+// CSV of the payruns currently on screen - same filters, no pagination.
+router.get(
+  '/payruns/export',
+  canRead,
+  asyncHandler(async (req, res) => {
+    const rows = await prisma.payrun.findMany({
+      where: payrunWhereFor(req),
+      orderBy: { periodStart: 'desc' },
+      take: EXPORT_LIMIT,
+      include: {
+        structure: { select: { name: true } },
+        payslips: { select: { gross: true, deduction: true, net: true, status: true } },
+        warnings: { select: { id: true } },
+      },
+    });
+    sendCsv(res, 'payruns', PAYRUN_CSV, rows);
   }),
 );
 
@@ -542,19 +583,7 @@ router.get(
   '/payslips',
   asyncHandler(async (req, res) => {
     const q = listQuerySchema.parse(req.query);
-    const { payrunId, employeeId, status } = req.query;
-    const f = payrunFilterSchema.parse(req.query);
-    const window = periodWindow(f.year, f.month);
-
-    const where = {
-      // Employees may read their own payslips; payroll roles see everything.
-      ...(isPayroll(req.user.role) ? {} : { employee: { userId: req.user.id } }),
-      ...(payrunId ? { payrunId } : {}),
-      ...(employeeId ? { employeeId } : {}),
-      ...(status ? { status } : {}),
-      ...(window ? { periodStart: window } : {}),
-      ...(q.search ? { number: { contains: q.search, mode: 'insensitive' } } : {}),
-    };
+    const where = payslipWhereFor(req);
 
     const [rows, total] = await Promise.all([
       prisma.payslip.findMany({
@@ -574,6 +603,41 @@ router.get(
   }),
 );
 
+const PAYSLIP_CSV = [
+  { header: 'Payslip', value: (r) => r.number },
+  { header: 'Employee', value: (r) => `${r.employee.firstName} ${r.employee.lastName}` },
+  { header: 'Work Email', value: (r) => r.employee.workEmail },
+  { header: 'Bank Account', value: (r) => r.employee.bankAccount },
+  { header: 'Payrun', value: (r) => r.payrun?.name },
+  { header: 'Structure', value: (r) => r.payrun?.structure?.name },
+  { header: 'Period Start', value: (r) => r.periodStart },
+  { header: 'Period End', value: (r) => r.periodEnd },
+  { header: 'Worked Days', value: (r) => num(r.workedDays) },
+  { header: 'Worked Hours', value: (r) => num(r.workedHours) },
+  { header: 'Leave Days', value: (r) => num(r.leaveDays) },
+  { header: 'Basic', value: (r) => num(r.basic) },
+  { header: 'Allowances', value: (r) => num(r.allowance) },
+  { header: 'Gross', value: (r) => num(r.gross) },
+  { header: 'Deductions', value: (r) => num(r.deduction) },
+  { header: 'Net', value: (r) => num(r.net) },
+  { header: 'Status', value: (r) => r.status },
+  { header: 'Warnings', value: (r) => r.warnings.map((w) => w.message).join('; ') },
+];
+
+const PAYRUN_CSV = [
+  { header: 'Payrun', value: (r) => r.name },
+  { header: 'Structure', value: (r) => r.structure?.name },
+  { header: 'Period Start', value: (r) => r.periodStart },
+  { header: 'Period End', value: (r) => r.periodEnd },
+  { header: 'Status', value: (r) => r.status },
+  { header: 'Payslips', value: (r) => r.payslips.length },
+  { header: 'Gross', value: (r) => r.payslips.reduce((s, x) => s + Number(x.gross), 0).toFixed(2) },
+  { header: 'Deductions', value: (r) => r.payslips.reduce((s, x) => s + Number(x.deduction), 0).toFixed(2) },
+  { header: 'Net', value: (r) => r.payslips.reduce((s, x) => s + Number(x.net), 0).toFixed(2) },
+  { header: 'Warnings', value: (r) => r.warnings.length },
+  { header: 'Paid At', value: (r) => r.paidAt },
+];
+
 const PAYSLIP_DETAIL = {
   employee: {
     select: {
@@ -592,6 +656,25 @@ const loadPayslip = async (id) => {
   const row = await prisma.payslip.findUnique({ where: { id }, include: PAYSLIP_DETAIL });
   return { ...slipShape(row), contract: { ...row.contract, wage: num(row.contract.wage) } };
 };
+
+// CSV of the payslips currently on screen. This is the register a payroll team
+// actually hands to finance, so it carries the bank account and the warnings.
+router.get(
+  '/payslips/export',
+  asyncHandler(async (req, res) => {
+    const rows = await prisma.payslip.findMany({
+      where: payslipWhereFor(req),
+      orderBy: { periodStart: 'desc' },
+      take: EXPORT_LIMIT,
+      include: {
+        employee: { select: { firstName: true, lastName: true, workEmail: true, bankAccount: true } },
+        payrun: { select: { name: true, structure: { select: { name: true } } } },
+        warnings: { select: { message: true } },
+      },
+    });
+    sendCsv(res, 'payslips', PAYSLIP_CSV, rows);
+  }),
+);
 
 router.get(
   '/payslips/:id',
@@ -817,6 +900,67 @@ const mailBody = (slip) => {
 };
 
 // Bulk delivery from the payrun screen: one PDF per payslip, attached and sent.
+// Dry-run view of exactly what "Send Payslips" will do.
+//
+// The whole roster comes back in one request - who receives, who is skipped and
+// why, and each person's rendered subject and body - so the UI can show the list
+// and switch between recipients without another round trip. Bodies come from the
+// same mailBody() the sender uses, so the preview cannot drift from reality.
+//
+// PDFs are not rendered here: only the attachment filename is reported, which
+// keeps a preview of 87 payslips instant.
+router.get(
+  '/payruns/:id/send-preview',
+  canFinalise,
+  asyncHandler(async (req, res) => {
+    const payrun = await prisma.payrun.findUnique({ where: { id: req.params.id } });
+    if (!payrun) throw notFound('Payrun not found');
+
+    const slips = await prisma.payslip.findMany({
+      where: { payrunId: payrun.id },
+      include: PDF_INCLUDE,
+      orderBy: { number: 'asc' },
+    });
+
+    const recipients = slips.map((slip) => {
+      // Cancelled payslips are void and are never sent.
+      const blocked = !slip.employee.workEmail
+        ? 'No work email on file'
+        : slip.status === 'CANCELLED'
+          ? 'Payslip is cancelled'
+          : null;
+      const { subject, text } = mailBody(slip);
+      return {
+        payslipId: slip.id,
+        number: slip.number,
+        employeeId: slip.employee.id,
+        name: `${slip.employee.firstName} ${slip.employee.lastName}`,
+        to: slip.employee.workEmail,
+        deliverable: !blocked,
+        reason: blocked,
+        subject,
+        text,
+        attachment: `${slip.number.replace(/\//g, '-')}.pdf`,
+        alreadySentAt: slip.emailSentAt,
+      };
+    });
+
+    res.json({
+      payrun: { id: payrun.id, name: payrun.name, status: payrun.status },
+      // Says up front whether this will actually leave the server.
+      smtp: { configured: mailEnabled() },
+      canSend: ['VALIDATED', 'PAID'].includes(payrun.status),
+      summary: {
+        total: recipients.length,
+        deliverable: recipients.filter((r) => r.deliverable).length,
+        skipped: recipients.filter((r) => !r.deliverable).length,
+        resend: recipients.filter((r) => r.deliverable && r.alreadySentAt).length,
+      },
+      recipients,
+    });
+  }),
+);
+
 router.post(
   '/payruns/:id/send',
   canFinalise,

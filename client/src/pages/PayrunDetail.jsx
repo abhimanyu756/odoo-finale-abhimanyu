@@ -5,6 +5,7 @@ import {
   Pencil, Printer, Plus,
 } from 'lucide-react';
 import { useFetch } from '../hooks/useApi';
+import SendPreview from '../components/SendPreview';
 import { api, errorMessage, getAccessToken } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -31,6 +32,7 @@ export default function PayrunDetail() {
   const [busy, setBusy] = useState(null);
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   if (loading) return <Spinner label="Loading payrun" />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
@@ -226,7 +228,7 @@ export default function PayrunDetail() {
                   <BadgeCheck size={14} /> Mark Paid
                 </button>
                 <button type="button" className="o-btn-primary" disabled={!canSend || busy}
-                  onClick={() => act('send', 'Sending')}>
+                  onClick={() => setPreviewing(true)}>
                   <Send size={14} /> {busy === 'send' ? 'Sending…' : 'Send Payslips'}
                 </button>
                 <button type="button" className="o-btn-secondary px-2" onClick={() => setEditing(true)}
@@ -442,6 +444,19 @@ export default function PayrunDetail() {
           )}
         </div>
       </div>
+
+      {previewing && (
+        <SendPreview
+          payrunId={id}
+          sending={busy === 'send'}
+          onClose={() => setPreviewing(false)}
+          onConfirm={async () => {
+            setPreviewing(false);
+            // The original send path, unchanged - the preview only precedes it.
+            await act('send', 'Sending');
+          }}
+        />
+      )}
 
       {adding && (
         <AddEmployeesModal

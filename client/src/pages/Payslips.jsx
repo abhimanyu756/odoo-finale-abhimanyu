@@ -4,7 +4,7 @@ import { useList, useFetch } from '../hooks/useApi';
 import { useAuth } from '../context/AuthContext';
 import { isPayroll } from '../lib/roles';
 import { money, date } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, SearchSelect, PagerBar, PeriodFilter } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, SearchSelect, PagerBar, PeriodFilter, ExportButton } from '../components/ui';
 
 export default function Payslips() {
   const [sp] = useSearchParams();
@@ -49,6 +49,7 @@ export default function Payslips() {
           month={list.params.month}
           onChange={(v) => list.setParam(v)}
         />
+        <ExportButton path={'/payroll/payslips/export'} params={list.params} name="payslips" />
         <PagerBar page={list.page} pages={list.pages} total={list.total}
           limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>

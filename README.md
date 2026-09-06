@@ -296,6 +296,74 @@ Approval is a control, so it is never self-applied:
   officer **or** that employee's named **HR Responsible**, and `NONE`
   auto-approves on submission.
 
+### Audit trail
+
+A record of who changed what, bolted on rather than woven in. **No route code
+was modified to produce it**: writes are captured by a Prisma client extension,
+and the actor travels through the request in `AsyncLocalStorage` (decoded from
+the bearer token by its own middleware, so even the auth layer is untouched).
+
+`AuditLog` has **no foreign keys and no relation fields on any other model** —
+it stores the actor and the record as plain text, so deleting an employee can
+never cascade away their history, and no existing query changes because the
+table exists. Three rules keep it out of the way: never throw (a failed audit
+write cannot fail a payroll operation), never block (logged after the operation
+returns), never touch high-volume tables.
+
+It records decisions, not machine output. Creating a 40-person payrun, computing
+it and cancelling one payslip produces **3 rows, not 75** — payslip creation is
+the payrun's expansion, and recomputing figures is not a decision.
+
+### CSV export
+
+Employees, Payruns and Payslips each export the rows currently on screen. The
+export route reuses the list route's own `where` clause — the same filters,
+search and scoping, minus the pagination — so the file always matches the view.
+Verified: a filtered list showing 161 payslips exports exactly 161 rows, and an
+employee exporting their own payslips gets only their own.
+
+Files carry a UTF-8 BOM, without which Excel mangles the rupee sign and every
+non-ASCII name.
+
+### Send preview
+
+`Send Payslips` opens a dry run first. With 87 recipients the useful question is
+not "what does one email look like" but **"who is about to receive mail, and who
+will not"** — so the roster leads: a per-recipient list marking who is
+deliverable and why anyone is skipped, with counts for how many have already
+been emailed once. Selecting a name shows that person's exact subject, body and
+attachment filename.
+
+The whole set arrives in one request, so switching between recipients is
+instant, and the bodies come from the same `mailBody()` the sender uses, so the
+preview cannot drift from what is actually sent. PDFs are not rendered for a
+preview. Confirming hands off to the existing send flow unchanged.
+
+### Ask HR — natural-language queries
+
+A floating button opens a chat that answers questions about live data:
+*"Which Finance employees had attendance below 80% this month?"*
+
+**The model never touches the database and never writes a query.** It picks one
+of six typed, read-only tools and fills in their parameters; the tool then runs
+the same scoped code the screens run. That choice carries three properties:
+
+- **Authorization is free.** Tools reuse the existing scope, so an `EMPLOYEE`
+  asking "list everyone" gets exactly one row — their own. Verified.
+- **Numbers cannot be hallucinated.** All arithmetic happens in PostgreSQL. The
+  model sees only the result's shape and an 8-row sample, and the table the user
+  reads is rendered from the server's rows — so the sentence and the figures
+  come from the same response and cannot disagree.
+- **Nothing can be changed from chat.** There is no approve, pay, edit or delete
+  tool. Bank accounts, addresses and identification numbers are stripped before
+  anything reaches the model.
+
+Each answer shows the tool and arguments that produced it, so the query is
+auditable by eye rather than taken on trust.
+
+Optional: without `GEMINI_API_KEY` the chat reports that it is offline and the
+rest of the app is unaffected.
+
 ---
 
 ## API surface
@@ -324,6 +392,10 @@ GET    /api/payroll/payslips             GET /api/payroll/payslips/:id/pdf
 DELETE /api/payroll/payslips/:id         (remove a row before validation)
 POST   /api/payroll/payslips/:id/cancel  (void after validation, keeps the record)
 GET    /api/dashboard                    GET /api/dashboard/drilldown
+GET    /api/payroll/payruns/:id/send-preview   (dry run: roster + rendered bodies)
+GET    /api/employees/export | /api/payroll/payruns/export | payslips/export  (CSV)
+GET    /api/audit | /api/audit/meta | /api/audit/:entity/:entityId   (read-only)
+GET    /api/assistant/status         POST /api/assistant/chat        (read-only)
 ```
 
 Every list endpoint accepts `?page=&limit=&search=&sortBy=&sortDir=`, and the

@@ -6,7 +6,7 @@ import { useFetch } from '../hooks/useApi';
 import { useAuth } from '../context/AuthContext';
 import { isHr } from '../lib/roles';
 import { initials, titleCase } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, SearchSelect, PagerBar } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, SearchSelect, PagerBar, ExportButton } from '../components/ui';
 import EmployeeCreateModal from '../components/EmployeeCreateModal';
 
 function KanbanCard({ e }) {
@@ -127,6 +127,7 @@ export default function Employees() {
           <option value="ACTIVE">Active</option>
           <option value="INACTIVE">Inactive</option>
         </select>
+        <ExportButton path={'/employees/export'} params={list.params} name="employees" />
         <PagerBar page={list.page} pages={list.pages} total={list.total}
           limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>

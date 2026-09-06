@@ -12,6 +12,7 @@ import Contracts from './pages/Contracts';
 import Attendance from './pages/Attendance';
 import WorkingSchedules from './pages/WorkingSchedules';
 import Departments from './pages/Departments';
+import AuditLog from './pages/AuditLog';
 import TimeOffRequests from './pages/TimeOffRequests';
 import TimeOffAllocations from './pages/TimeOffAllocations';
 import TimeOffTypes from './pages/TimeOffTypes';
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="/attendance" element={<Attendance />} />
         <Route path="/working-schedules" element={<Guard min="HR_MANAGER"><WorkingSchedules /></Guard>} />
         <Route path="/departments" element={<Guard min="HR_MANAGER"><Departments /></Guard>} />
+        <Route path="/audit" element={<Guard min="HR_PAYROLL_ADMIN"><AuditLog /></Guard>} />
 
         <Route path="/time-off/requests" element={<TimeOffRequests />} />
         <Route path="/time-off/allocations" element={<TimeOffAllocations />} />

@@ -16,6 +16,17 @@ export const env = {
     accessTtl: process.env.ACCESS_TOKEN_TTL || '15m',
     refreshTtl: process.env.REFRESH_TOKEN_TTL || '7d',
   },
+  // Optional. Without a key the assistant degrades to a clear message rather
+  // than failing, so the app runs exactly as before.
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY || null,
+    // "…-latest" tracks Google's current flash model, so a retired version
+    // never silently breaks the assistant the way gemini-2.0-flash did.
+    model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
+    // Tried when the primary is rate limited or overloaded.
+    fallbackModel: process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash',
+    enabled: Boolean(process.env.GEMINI_API_KEY),
+  },
   mail: {
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),

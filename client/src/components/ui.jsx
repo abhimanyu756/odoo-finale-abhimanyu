@@ -1,9 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Loader2, Inbox, AlertTriangle, ChevronLeft, ChevronRight, Eye, EyeOff,
-  ChevronDown, ChevronsLeft, ChevronsRight, Search, Check,
+  ChevronDown, ChevronsLeft, ChevronsRight, Search, Check, Download,
 } from 'lucide-react';
 import { titleCase } from '../lib/format';
+import { downloadFile } from '../lib/api';
 
 // A password field with a reveal toggle. The button is type="button" so it can
 // never submit the surrounding form, and it reports its state to screen readers
@@ -514,6 +515,38 @@ export function PeriodFilter({ year, month, onChange, label = 'Period' }) {
           ...MONTHS.map((m, i) => ({ value: String(i + 1), label: m }))]}
       />
     </span>
+  );
+}
+
+// Downloads the current view as CSV. Sits in a page's filter row and passes
+// that page's live params, so the file always matches what is on screen.
+export function ExportButton({ path, params, name = 'export', label = 'Export CSV' }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const run = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      await downloadFile(path, params, `${name}.csv`);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={run}
+      disabled={busy}
+      title="Download the rows matching the current filters"
+      className={`o-btn-secondary px-2.5 py-1.5 text-xs ${failed ? 'border-red-300 text-red-600' : ''}`}
+    >
+      <Download size={13} />
+      {busy ? 'Preparing…' : failed ? 'Retry export' : label}
+    </button>
   );
 }
 

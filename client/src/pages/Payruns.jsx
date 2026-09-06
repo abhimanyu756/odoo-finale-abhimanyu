@@ -5,7 +5,7 @@ import { useList, useFetch } from '../hooks/useApi';
 import { api, errorMessage } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { money, date, compactMoney } from '../lib/format';
-import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, SearchSelect, PagerBar, PeriodFilter } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, ErrorState, StatusBadge, Pagination, Modal, Field, SearchSelect, PagerBar, PeriodFilter, ExportButton } from '../components/ui';
 
 export default function Payruns() {
   const navigate = useNavigate();
@@ -45,6 +45,7 @@ export default function Payruns() {
           options={[{ value: '', label: 'All structures' },
             ...(structures?.rows ?? []).map((x) => ({ value: x.id, label: x.name, hint: x.code }))]}
         />
+        <ExportButton path={'/payroll/payruns/export'} params={list.params} name="payruns" />
         <PagerBar page={list.page} pages={list.pages} total={list.total}
           limit={list.params.limit} onPage={(p) => list.setParam({ page: p })} />
       </div>

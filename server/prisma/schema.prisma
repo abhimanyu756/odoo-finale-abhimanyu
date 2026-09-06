@@ -587,3 +587,39 @@ model PayrollWarning {
 
   @@index([payrunId])
 }
+
+// ---------------------------------------------------------------------------
+// Audit trail
+// ---------------------------------------------------------------------------
+
+// Deliberately isolated from the rest of the schema: no foreign keys, no
+// relation fields on any other model. An audit row records the *identity* of
+// what changed as plain strings, so deleting an employee can never cascade away
+// their history, and no existing query plan changes because this table exists.
+//
+// Written by a Prisma extension rather than by route code, so no business path
+// has to remember to log - and a logging failure can never fail a request.
+model AuditLog {
+  id        String   @id @default(uuid())
+  at        DateTime @default(now())
+
+  // Snapshot of the actor. Stored as text, not a User relation, so the trail
+  // survives the account being deleted.
+  actorId    String?
+  actorEmail String?
+  actorRole  String?
+
+  // "create" | "update" | "delete", the model, and the row's id.
+  action   String
+  entity   String
+  entityId String?
+  // Human-readable stamp of what the row was, e.g. a payslip number.
+  label    String?
+
+  // Only the fields that actually changed, as { field: { from, to } }.
+  changes Json?
+
+  @@index([entity, entityId])
+  @@index([at])
+  @@index([actorId])
+}

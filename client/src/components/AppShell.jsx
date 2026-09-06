@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { LogOut, ChevronDown, Clock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { isHr, isPayroll, isAdmin, ROLE_LABELS } from '../lib/roles';
+import { isHr, isPayroll, isPayrollAdmin, isAdmin, ROLE_LABELS } from '../lib/roles';
 import { initials } from '../lib/format';
 import AttendanceWidget from './AttendanceWidget';
+import AskHr from './AskHr';
 
 // Top navigation mirrors the mockup: Employees, Contracts, Attendance,
 // Time Off, Payroll — with dropdowns where the mockup shows a caret.
@@ -50,6 +51,7 @@ const navFor = (role) => {
   } else {
     items.push({ label: 'My Payslips', to: '/payroll/payslips' });
   }
+  if (isPayrollAdmin(role)) items.push({ label: 'Audit', to: '/audit' });
   if (isAdmin(role)) items.push({ label: 'User Access', to: '/admin/users' });
   return items;
 };
@@ -219,6 +221,9 @@ export default function AppShell() {
       <main className="mx-auto max-w-[1600px] px-4 py-5">
         <Outlet />
       </main>
+
+      {/* Fixed-position overlay: mounted once, affects no page's layout. */}
+      <AskHr />
     </div>
   );
 }
